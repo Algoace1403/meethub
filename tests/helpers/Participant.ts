@@ -1,0 +1,1509 @@
+/* global APP $ */
+
+import assert from 'assert';
+import { Key } from 'webdriverio';
+
+import { IConfig } from '../../react/features/base/config/configType';
+import { urlObjectToString } from '../../react/features/base/util/uri';
+import BreakoutRooms from '../pageobjects/BreakoutRooms';
+import ChatPanel from '../pageobjects/ChatPanel';
+import FileSharingPanel from '../pageobjects/FileSharingPanel';
+import Filmstrip from '../pageobjects/Filmstrip';
+import IframeAPI from '../pageobjects/IframeAPI';
+import InviteDialog from '../pageobjects/InviteDialog';
+import LargeVideo from '../pageobjects/LargeVideo';
+import LobbyScreen from '../pageobjects/LobbyScreen';
+import Notifications, {
+    MAX_USERS_TEST_ID,
+    TOKEN_AUTH_FAILED_TEST_ID,
+    TOKEN_AUTH_FAILED_TITLE_TEST_ID
+} from '../pageobjects/Notifications';
+import ParticipantsPane from '../pageobjects/ParticipantsPane';
+import PasswordDialog from '../pageobjects/PasswordDialog';
+import PreJoinScreen from '../pageobjects/PreJoinScreen';
+import RecordingTranscriptionDialog from '../pageobjects/RecordingTranscriptionDialog';
+import SecurityDialog from '../pageobjects/SecurityDialog';
+import SettingsDialog from '../pageobjects/SettingsDialog';
+import Toolbar from '../pageobjects/Toolbar';
+import VideoQualityDialog from '../pageobjects/VideoQualityDialog';
+import VirtualBackgroundDialog from '../pageobjects/VirtualBackgroundDialog';
+import Visitors from '../pageobjects/Visitors';
+
+import { config as testsConfig } from './TestsConfig';
+import { LOG_PREFIX, logInfo } from './browserLogger';
+import { IToken } from './token';
+import { IParticipantJoinOptions, IParticipantOptions } from './types';
+
+export const P1 = 'p1';
+export const P2 = 'p2';
+export const P3 = 'p3';
+export const P4 = 'p4';
+export const P5 = 'p5';
+export const P6 = 'p6';
+
+/**
+ * How long to wait for a script to return a result, mirroring `connectionRetryTimeout` in the wdio configs.
+ * That setting covers the classic HTTP commands, but a WebDriver BiDi script call goes over the session's
+ * websocket, where a call aimed at a browsing context that has gone away simply never gets a response. That
+ * is worse than slow: wdio's waitUntil arms its own timeout only once a condition has been evaluated, so a
+ * first evaluation that never settles hangs the wait with no error at all, and the test spends its whole
+ * mocha budget before failing with an uninformative "Timeout of 180000ms exceeded". Bounding the call keeps
+ * the failure attributable to the script that got stuck. See also switchToIFrame(), which is where such a
+ * context has been observed being pinned.
+ */
+const EXECUTE_TIMEOUT = 30_000;
+
+/**
+ * How long to give a freshly switched-into iframe context to answer a trivial script. A live context answers in
+ * milliseconds even on a loaded grid; one that does not answer this never will (see switchToIFrame()), so there is
+ * no point in giving it the full EXECUTE_TIMEOUT before moving on to recovery.
+ */
+const IFRAME_PROBE_TIMEOUT = 5_000;
+
+/**
+ * How many times joinConference() loads the iframe API wrapper page again when the iframe it created is dead.
+ */
+const MAX_IFRAME_RELOADS = 2;
+
+/**
+ * Participant.
+ */
+export class Participant {
+    /**
+     * The current context.
+     *
+     * @private
+     */
+    private _name: string;
+    private _endpointId: string;
+
+    /**
+     * The browser session this participant is bound to, when not using a multiremote instance.
+     */
+    private _driver?: WebdriverIO.Browser;
+
+    /**
+     * Whether this participant runs the load-test client rather than the full application.
+     */
+    private _loadTest: boolean;
+    /**
+     * The token that this participant was initialized with.
+     */
+    private _token?: IToken;
+
+    /**
+     * Cache the dial in pin code so that it doesn't have to be read from the UI.
+     */
+    private _dialInPin?: string;
+
+    private _iFrameApi: boolean = false;
+
+    /**
+     * Whether the current frame is the main frame. This could coincide with the Jitsi Meet frame (when it's loaded
+     * directly), or not (when it's loaded in an iframe).
+     */
+    private _inMainFrame: boolean = true;
+
+    /**
+     * Set once switchToIFrame() has given up on this participant's iframe: every attempt landed on a browsing
+     * context that does not answer. Later callers (the failure hook in wdio.conf.ts in particular) use it to skip
+     * another round of the same 30s-per-attempt wait, which would otherwise push a failed test past its mocha
+     * budget and replace the real error with a bare timeout.
+     */
+    private _iframeUnreachable = false;
+
+    /**
+     * The default config to use when joining.
+     *
+     * @private
+     */
+    private config = {
+        analytics: {
+            disabled: true
+        },
+
+        // if there is a video file to play, use deployment config,
+        // otherwise use lower resolution to avoid high CPU usage
+        constraints: process.env.VIDEO_CAPTURE_FILE ? undefined : {
+            video: {
+                height: {
+                    ideal: 360,
+                    max: 360,
+                    min: 180
+                },
+
+                // @ts-ignore
+                width: {
+                    ideal: 640,
+                    max: 640,
+                    min: 320
+                },
+                frameRate: {
+                    max: 30
+                }
+            }
+        },
+        resolution: process.env.VIDEO_CAPTURE_FILE ? undefined : 360,
+
+        requireDisplayName: false,
+        testing: {
+            testMode: true
+        },
+        disableAP: true,
+        disable1On1Mode: true,
+        disableModeratorIndicator: true,
+        enableTalkWhileMuted: false,
+        gatherStats: true,
+        p2p: {
+            enabled: false,
+            useStunTurn: false
+        },
+        pcStatsInterval: 1500,
+        timeTimer: {
+            enabled: false
+        },
+        toolbarConfig: {
+            alwaysVisible: true
+        }
+    } as IConfig;
+
+    /**
+     * Creates a participant with given options.
+     */
+    constructor(options: IParticipantOptions) {
+        this._name = options.name;
+        this._token = options.token;
+        this._iFrameApi = options.iFrameApi || false;
+        this._loadTest = options.loadTest || false;
+        this._driver = options.driver;
+    }
+
+    /**
+     * A wrapper for <tt>this.driver.execute</tt> that would catch errors, print them and throw them again.
+     *
+     * @param {string | ((...innerArgs: InnerArguments) => ReturnValue)} script - The script that will be executed.
+     * @param {any[]} args - The rest of the arguments.
+     * @returns {ReturnValue} - The result of the script.
+     */
+    async execute<ReturnValue, InnerArguments extends any[]>(
+            script: string | ((...innerArgs: InnerArguments) => ReturnValue),
+            ...args: InnerArguments): Promise<ReturnValue> {
+        return this._executeWithin(EXECUTE_TIMEOUT, script, ...args);
+    }
+
+    /**
+     * Runs a script with a bound on how long to wait for its result. See execute().
+     *
+     * @param {number} timeout - How long to wait for the result, in ms.
+     * @param {string | Function} script - The script that will be executed.
+     * @param {any[]} args - The rest of the arguments.
+     * @returns {ReturnValue} - The result of the script.
+     */
+    private async _executeWithin<ReturnValue, InnerArguments extends any[]>(
+            timeout: number,
+            script: string | ((...innerArgs: InnerArguments) => ReturnValue),
+            ...args: InnerArguments): Promise<ReturnValue> {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+
+        // @ts-ignore
+        const result = this.driver.execute(script, ...args) as Promise<ReturnValue>;
+
+        // The timeout below can win the race, and this promise then settles with nobody waiting on it.
+        // An unhandled rejection would take down the whole worker, so keep it handled.
+        result.catch(() => undefined);
+
+        try {
+            return await Promise.race([
+                result,
+                new Promise<ReturnValue>((_, reject) => {
+                    timer = setTimeout(
+                        () => reject(new Error(
+                            `Timeout of ${timeout}ms executing a script for ${this._name}.`)),
+                        timeout);
+                })
+            ]);
+        } catch (error) {
+            console.error('An error occurred while trying to execute a script: ', error);
+            throw error;
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
+    /**
+     * Returns participant endpoint ID.
+     *
+     * @returns {Promise<string>} The endpoint ID.
+     */
+    async getEndpointId(): Promise<string> {
+        if (!this._endpointId) {
+            const wasInMainFrame = this._inMainFrame;
+
+            await this.switchToIFrame();
+
+            this._endpointId = await this.execute(() => { // eslint-disable-line arrow-body-style
+                return APP?.conference?.getMyUserId();
+            });
+
+            if (wasInMainFrame) {
+                await this.switchToMainFrame();
+            }
+        }
+
+        return this._endpointId;
+    }
+
+    /**
+     * The driver it uses.
+     */
+    get driver() {
+        return this._driver ?? multiRemoteBrowser.getInstance(this._name);
+    }
+
+    /**
+     * Whether this participant runs the load-test client rather than the full application.
+     */
+    get isLoadTest() {
+        return this._loadTest;
+    }
+
+    /**
+     * The name.
+     */
+    get name() {
+        return this._name;
+    }
+
+    /**
+     * Adds a log to the participants log file.
+     *
+     * @param {string} message - The message to log.
+     * @returns {void}
+     */
+    async log(message: string): Promise<void> {
+        await logInfo(this.driver, message);
+    }
+
+    /**
+     * Joins conference.
+     *
+     * @param {IParticipantJoinOptions} options - Options for joining.
+     * @returns {Promise<void>}
+     */
+    async joinConference(options: IParticipantJoinOptions): Promise<Participant> {
+        const config = {
+            room: options.roomName,
+            configOverwrite: {
+                ...this.config,
+                ...options.configOverwrite || {}
+            },
+            interfaceConfigOverwrite: {
+                SHOW_CHROME_EXTENSION_BANNER: false
+            }
+        };
+
+        if (!options.skipDisplayName) {
+            // @ts-ignore
+            config.userInfo = {
+                displayName: this._name
+            };
+        }
+
+        if (this._iFrameApi) {
+            config.room = 'iframeAPITest.html';
+        } else if (this._loadTest) {
+            config.room = 'loadTest.html';
+        }
+
+        let url = urlObjectToString(config) || '';
+
+        if (this._loadTest) {
+            // The uploaded wrapper page (see the malleus wdio config); it loads config.js and lib-jitsi-meet from
+            // the deployment and the uploaded client bundle, which takes the room and config from the hash.
+            const baseUrl = new URL(this.driver.options.baseUrl || '');
+            let tenant = options.tenant ?? (baseUrl.pathname.length > 1 ? baseUrl.pathname.substring(1) : '');
+
+            // The page prepends it to "config.js", so it needs the trailing slash options.tenant comes without.
+            if (tenant && !tenant.endsWith('/')) {
+                tenant += '/';
+            }
+
+            // @ts-ignore
+            url = `${this.driver.loadTestPageBase}${url}&domain="${baseUrl.host}"&room="${options.roomName}"`
+                // @ts-ignore
+                + `&tenant="${tenant}"&bundle="${this.driver.loadTestBundle}"`;
+        } else if (this._iFrameApi) {
+            const baseUrl = new URL(this.driver.options.baseUrl || '');
+
+            // @ts-ignore
+            url = `${this.driver.iframePageBase}${url}&domain="${baseUrl.host}"&room="${options.roomName}"`;
+
+            if (options.tenant) {
+                url = `${url}&tenant="${options.tenant}"`;
+            } else if (baseUrl.pathname.length > 1) {
+                // remove leading slash
+                url = `${url}&tenant="${baseUrl.pathname.substring(1)}"`;
+            }
+
+            // When the conferences are pinned to a release through the room name suffix, load the external API
+            // from that release as well.
+            if (testsConfig.roomName.suffix) {
+                url = `${url}&externalApiPath="${testsConfig.roomName.suffix}"`;
+            }
+        }
+        if (this._token?.jwt) {
+            url = `${url}&jwt="${this._token.jwt}"`;
+        }
+
+        await this.driver.setTimeout({ 'pageLoad': 30000 });
+
+        // drop the leading '/' so we can use the tenant if any
+        url = url.startsWith('/') ? url.substring(1) : url;
+
+        if (options.tenant && !this._iFrameApi && !this._loadTest) {
+            // For the iFrame API and the load-test page the tenant is passed in a different way.
+            url = `/${options.tenant}/${url}`;
+        }
+        if (options.urlAppendString) {
+            url = `${url}${options.urlAppendString}`;
+        }
+
+        await this.driver.url(url);
+
+        await this.waitForPageToLoad();
+
+        // If the URL changed, wait for the new page to load before proceeding.
+        const currentUrl = await this.driver.getUrl();
+
+        if (!currentUrl.includes(url)) {
+            await this.waitForPageToLoad();
+        }
+
+        if (this._iFrameApi) {
+            await this._switchToFreshIFrame(url);
+        }
+
+        if (!options.skipPrejoinButtonClick && !this._loadTest) {
+            // The prejoin Join button can be in the DOM before conference.init has run and React click
+            // handlers are mounted (e.g. when driver.url() returns before the page fully loads on a slow
+            // remote grid, or when the iFrame API wrapper fires onload before the embedded app inits).
+            // APP.store is created during conference.init, so gate the click on it to avoid the race. It
+            // also has to come before the `config` probe below, which reads a global the app script
+            // defines. Failed evaluations are retried rather than propagated: this is the first script run
+            // against a freshly loaded page (or, with the iFrame API, a frame just switched into).
+            await this.driver.waitUntil(
+                async () => {
+                    try {
+                        // @ts-ignore
+                        return await this.execute(() => typeof APP !== 'undefined' && Boolean(APP.store));
+                    } catch (e) {
+                        return false;
+                    }
+                },
+                {
+                    timeout: 30_000,
+                    timeoutMsg: `Timeout waiting for Jitsi app to initialize for ${this._name}.`
+                }
+            );
+
+            // @ts-ignore
+            if (!await this.execute(() => config.prejoinConfig?.enabled === false)) {
+                // if prejoin is enabled we want to click the join button
+                const p1PreJoinScreen = this.getPreJoinScreen();
+
+                await p1PreJoinScreen.waitForLoading();
+
+                await this._clickPrejoinJoinButton(p1PreJoinScreen);
+            }
+        }
+
+        if (!options.skipWaitToJoin) {
+            await this.waitForMucJoinedOrError();
+        }
+
+        if (this._loadTest) {
+            // The load-test client has no UI to adjust; just record the session like postLoadProcess does.
+            await this.execute((name, sessionId, prefix) => {
+                document.title = `${name}`;
+                console.log(`${new Date().toISOString()} ${prefix} sessionId: ${sessionId}`);
+            }, this._name, this.driver.sessionId, LOG_PREFIX);
+        } else {
+            await this.postLoadProcess();
+        }
+
+        return this;
+    }
+
+    /**
+     * Switches into the iframe of a just loaded iframe API wrapper page, loading the page again when the iframe it
+     * created is dead.
+     *
+     * A dead iframe is one whose browsing context Chrome's BiDi mapper never gets an execution context for (see
+     * switchToIFrame()): nothing sent into it ever answers, so retrying the switch cannot help and the only way to
+     * a working frame is a new one. Loading the wrapper again creates it, and the race that produced the dead one
+     * is rare enough that a fresh frame is almost always fine.
+     *
+     * @param {string} url - The wrapper page URL to load again.
+     * @returns {Promise<void>}
+     */
+    private async _switchToFreshIFrame(url: string): Promise<void> {
+        for (let reload = 0; ; reload++) {
+            try {
+                await this.switchToIFrame();
+
+                return;
+            } catch (e) {
+                if (!this._iframeUnreachable || reload === MAX_IFRAME_RELOADS) {
+                    throw e;
+                }
+
+                console.log(`The iframe of ${this._name} never answered, loading the page again (${
+                    reload + 1}/${MAX_IFRAME_RELOADS}).`);
+            }
+
+            this._iframeUnreachable = false;
+
+            // Through a blank page, so the same URL is a real load and not a no-op.
+            await this.driver.url('about:blank');
+            await this.driver.url(url);
+            await this.waitForPageToLoad();
+        }
+    }
+
+    /**
+     * Clicks the prejoin Join button and verifies that the click reached the app, retrying a bounded number of
+     * times when it did not.
+     *
+     * The button is re-rendered when the initial local tracks land, a few hundred ms after conference.init on a
+     * cached page load, and a click that arrives while React is swapping the node under it is dispatched to a
+     * detached element and dropped: the WebDriver click succeeds, but the onClick handler never runs and the
+     * participant sits on the prejoin screen until the join wait times out. joiningInProgress is set synchronously
+     * by the handler (see joinConference in the prejoin actions), so it tells a click that took from one that did
+     * not. It is cleared again when the connection or the conference fails, which can happen within the window
+     * below (an invalid token, a locked room), so the connection state is consulted too: connecting, connected or
+     * failed, any of them means the click reached the app and clicking again would start a second join.
+     *
+     * A lost click does not always mean a swapped node, though: on the grid the driver has reported successful
+     * clicks on a button that stayed the same node throughout, with the handler never running and focus never
+     * leaving the display name input, i.e. the input never reached the document at all. When the node the driver
+     * clicked is still the live one, the retry dispatches the click from inside the page instead, which does not
+     * go through the driver's input pipeline. Either way the retry logs which case it saw and where focus was.
+     *
+     * @param {PreJoinScreen} prejoinScreen - The prejoin screen page object.
+     * @returns {Promise<void>}
+     */
+    private async _clickPrejoinJoinButton(prejoinScreen: PreJoinScreen): Promise<void> {
+        const MAX_ATTEMPTS = 3;
+        let previousElementId: string | undefined;
+
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            const joinButton = prejoinScreen.getJoinButton();
+
+            await joinButton.waitForDisplayed();
+
+            const elementId = await joinButton.elementId;
+            const sameNode = elementId === previousElementId;
+            let kind: string;
+
+            previousElementId = elementId;
+
+            if (!sameNode) {
+                kind = 'driver';
+                await joinButton.click();
+            } else if (attempt < MAX_ATTEMPTS) {
+                // One more driver click on the same node, this time watched from inside the page: whether any mouse
+                // event reaches the document at all tells a click lost between the driver and the browser from one
+                // the page received and dropped.
+                kind = 'driver, probed';
+                await this.execute(() => {
+                    const seen: string[] = [];
+                    const record = (e: Event) => {
+                        seen.push(`${e.type}@${(e.target as Element)?.tagName?.toLowerCase()}`);
+                        document.body.dataset.joinClickProbe = seen.join(' ');
+                    };
+
+                    document.body.dataset.joinClickProbe = '';
+                    [ 'mousedown', 'mouseup', 'click', 'keydown' ].forEach(
+                        type => document.addEventListener(type, record, true));
+                });
+                await joinButton.click();
+            } else {
+                kind = 'in-page';
+                await prejoinScreen.clickJoinButtonFromPage();
+            }
+
+            try {
+                await this.driver.waitUntil(
+                    async () => await this.execute(() => {
+                        // @ts-ignore
+                        const state = APP.store.getState();
+                        const { connecting, connection, error } = state['features/base/connection'];
+
+                        return Boolean(state['features/prejoin']?.joiningInProgress)
+                            || !state['features/prejoin']?.showPrejoin
+                            || Boolean(connecting || connection || error)
+                            || Boolean(APP.conference?.isJoined());
+                    }),
+                    {
+                        timeout: 3000,
+                        interval: 100,
+                        timeoutMsg: `The prejoin Join click did not register for ${this._name}.`
+                    }
+                );
+
+                return;
+            } catch (e) {
+                if (attempt === MAX_ATTEMPTS) {
+                    throw new Error(
+                        `The prejoin Join click did not register for ${this._name} after ${MAX_ATTEMPTS} attempts.`);
+                }
+
+                const activeElement = await this.execute(() => {
+                    const el = document.activeElement;
+
+                    if (!el) {
+                        return 'none';
+                    }
+
+                    const testId = el.getAttribute('data-testid');
+
+                    return `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}${testId ? `[${testId}]` : ''}`;
+                }).catch(() => 'unknown');
+
+                const probe = await this.execute(() => document.body.dataset.joinClickProbe ?? '')
+                    .catch(() => 'unknown');
+                const message = `The prejoin Join click did not register for ${this._name} (attempt ${attempt}, ${
+                    kind} click, node ${elementId}, focus on ${activeElement}${
+                    kind === 'driver, probed' ? `, document saw [${probe}]` : ''}), clicking again.`;
+
+                console.log(message);
+
+                // Also into the browser log, which is what the CI archive keeps.
+                await logInfo(this.driver, message).catch(() => undefined);
+            }
+        }
+    }
+
+    /**
+     * Loads stuff after the page loads.
+     *
+     * @returns {Promise<void>}
+     * @private
+     */
+    private async postLoadProcess(): Promise<void> {
+        const driver = this.driver;
+
+        const parallel = [];
+
+        parallel.push(this.execute((name, sessionId, prefix) => {
+            APP?.UI?.dockToolbar(true);
+
+            // disable keyframe animations (.fadeIn and .fadeOut classes)
+            $('<style>.notransition * { '
+                + 'animation-duration: 0s !important; -webkit-animation-duration: 0s !important; transition:none; '
+                + '} </style>') // @ts-ignore
+                    .appendTo(document.head);
+
+            // @ts-ignore
+            $('body').toggleClass('notransition');
+
+            document.title = `${name}`;
+
+            console.log(`${new Date().toISOString()} ${prefix} sessionId: ${sessionId}`);
+
+            // disable the blur effect in firefox as it has some performance issues
+            const blur = document.querySelector('.video_blurred_container');
+
+            if (blur) {
+                // @ts-ignore
+                document.querySelector('.video_blurred_container').style.display = 'none';
+            }
+        }, this._name, driver.sessionId, LOG_PREFIX));
+
+        await Promise.all(parallel);
+    }
+
+    /**
+     * Waits for the page to load.
+     *
+     * @returns {Promise<boolean>}
+     */
+    async waitForPageToLoad(): Promise<boolean> {
+        return this.driver.waitUntil(
+            () => this.execute(() => {
+                console.log(`${new Date().toISOString()} document.readyState: ${document.readyState}`);
+
+                return document.readyState === 'complete';
+            }),
+            {
+                timeout: 30_000, // 30 seconds
+                timeoutMsg: `Timeout waiting for Page Load Request to complete for ${this.name}.`
+            }
+        );
+    }
+
+    /**
+     * Waits for the tile view to display.
+     */
+    async waitForTileViewDisplayed(reverse = false) {
+        await this.driver.$('//div[@id="videoconference_page" and contains(@class, "tile-view")]').waitForDisplayed({
+            reverse,
+            timeout: 10_000,
+            timeoutMsg: `Tile view did not display in 10s for ${this.name}`
+        });
+    }
+
+    /**
+     * Checks if the participant is in the meeting.
+     */
+    isInMuc() {
+        if (this._loadTest) {
+            // @ts-ignore
+            return this.execute(() => typeof APP !== 'undefined' && Boolean(APP.room?.isJoined()));
+        }
+
+        return this.execute(() => typeof APP !== 'undefined' && APP.conference?.isJoined());
+    }
+
+    /**
+     * Waits until either the MUC is joined, or a password prompt is displayed, or an authentication failure
+     * notification is displayed, or max users notification is displayed.
+     */
+    async waitForMucJoinedOrError(): Promise<void> {
+        await this.driver.waitUntil(async () => {
+            if (this._loadTest) {
+                return await this.isInMuc();
+            }
+
+            return await this.isInMuc() || await this.getPasswordDialog().isOpen()
+                || await this.getNotifications().getNotificationText(MAX_USERS_TEST_ID)
+                || await this.getNotifications().getNotificationText(TOKEN_AUTH_FAILED_TEST_ID)
+                || await this.getNotifications().getNotificationText(TOKEN_AUTH_FAILED_TITLE_TEST_ID);
+        }, {
+            timeout: 30_000,
+            timeoutMsg: 'Timeout waiting for MUC joined or error.'
+        });
+    }
+
+    /**
+     * Checks if the participant is a moderator in the meeting.
+     */
+    async isModerator() {
+        return await this.execute(() => typeof APP !== 'undefined'
+            && APP.store?.getState()['features/base/participants']?.local?.role === 'moderator');
+    }
+
+    async isVisitor() {
+        return await this.execute(() => APP?.store?.getState()['features/visitors']?.iAmVisitor || false);
+    }
+
+    /**
+     * Checks if the meeting supports breakout rooms.
+     */
+    async isBreakoutRoomsSupported() {
+        return await this.execute(() => typeof APP !== 'undefined'
+            && APP.store?.getState()['features/base/conference'].conference?.getBreakoutRooms()?.isSupported());
+    }
+
+    /**
+     * Checks if the participant is in breakout room.
+     */
+    async isInBreakoutRoom() {
+        return await this.execute(() => typeof APP !== 'undefined'
+            && APP.store?.getState()['features/base/conference'].conference?.getBreakoutRooms()?.isBreakoutRoom());
+    }
+
+    /**
+     * Waits to join the muc.
+     *
+     * @returns {Promise<void>}
+     */
+    async waitToJoinMUC(): Promise<void> {
+        return this.driver.waitUntil(
+            () => this.isInMuc(),
+            {
+                timeout: 10_000, // 10 seconds
+                timeoutMsg: `Timeout waiting to join muc for ${this.name}`
+            }
+        );
+    }
+
+    /**
+     * Waits for ICE to get connected.
+     *
+     * @returns {Promise<boolean>}
+     */
+    waitForIceConnected(): Promise<boolean> {
+        return this.driver.waitUntil(() =>
+            this.execute(() => {
+                const state = APP?.conference?.getConnectionState();
+
+                if (state === 'connected') {
+                    return true;
+                }
+
+                // Firefox can leave the JVB PeerConnection reporting a transient ICE
+                // 'disconnected' state (a brief consent-check blip) while the selected
+                // candidate pair keeps carrying media, and it does not always transition
+                // back to 'connected' the way Chrome does. Treat that as connected when
+                // stats show we are actually receiving media from the bridge, so a momentary
+                // disconnect does not fail the whole spec. Terminal 'failed'/'closed' keep waiting.
+                if (state === 'disconnected') {
+                    return APP?.conference?.getStats()?.bitrate?.download > 0;
+                }
+
+                return false;
+            }), {
+            timeout: 15_000,
+            timeoutMsg: `expected ICE to be connected for 15s for ${this.name}`
+        });
+    }
+
+    /**
+     * Waits for ICE to get connected on the p2p connection.
+     *
+     * @returns {Promise<boolean>}
+     */
+    waitForP2PIceConnected(): Promise<boolean> {
+        return this.driver.waitUntil(() =>
+            this.execute(() => APP?.conference?.getP2PConnectionState() === 'connected'), {
+            timeout: 15_000,
+            timeoutMsg: `expected P2P ICE to be connected for 15s for ${this.name}`
+        });
+    }
+
+    /**
+     * Waits until the conference stats show positive upload and download bitrate (independently).
+     *
+     * @returns {Promise<boolean>}
+     */
+    async waitForSendReceiveData(timeout = 15_000, msg?: string): Promise<boolean> {
+        const values = await Promise.all([
+            await this.waitForSendMedia(timeout, msg ? `${msg} (send)` : undefined),
+            await this.waitForReceiveMedia(timeout, msg ? `${msg} (receive)` : undefined)
+        ]);
+
+        return values[0] && values[1];
+    }
+
+    /**
+     * Waits until the conference stats show positive upload bitrate.
+     * @param timeout max time to wait in ms
+     * @param timeoutMsg the message to log if the timeout is reached
+     */
+    async waitForSendMedia(
+            timeout = 15_000,
+            timeoutMsg = `expected to send media in ${timeout / 1000}s for ${this.name}`): Promise<boolean> {
+
+        return this.driver.waitUntil(() => this.execute(() => {
+            return APP?.conference?.getStats()?.bitrate?.upload > 0;
+        }), {
+            timeout,
+            timeoutMsg
+        });
+    }
+
+    /**
+     * Waits until the conference stats show positive upload bitrate.
+     * @param timeout max time to wait in ms
+     * @param timeoutMsg the message to log if the timeout is reached
+     */
+    async waitForReceiveMedia(
+            timeout = 15_000,
+            timeoutMsg = `expected to receive media in ${timeout / 1000}s for ${this.name}`): Promise<boolean> {
+
+        return this.driver.waitUntil(() => this.execute(() => {
+            return APP?.conference?.getStats()?.bitrate?.download > 0;
+        }), {
+            timeout,
+            timeoutMsg
+        });
+    }
+
+    /**
+     * Waits until the stats report a positive framerate for the video of the given remote endpoint, which means that
+     * frames from that endpoint are actually being decoded. Receiving data is not enough on its own, when the sender
+     * uses a payload type that was not negotiated the packets are received but not a single frame gets decoded.
+     *
+     * @param {string} endpointId - The endpoint ID of the participant whose video should be decoded.
+     * @param {number} timeout - Max time to wait in ms.
+     * @returns {Promise<boolean>}
+     */
+    async waitForRemoteVideoDecoding(endpointId: string, timeout = 15_000): Promise<boolean> {
+        return this.driver.waitUntil(() => this.execute(id => {
+            const framerates: { [ssrc: string]: number; } = APP?.conference?.getStats()?.framerate?.[id] ?? {};
+
+            return Object.values(framerates).some(fps => fps > 0);
+        }, endpointId), {
+            timeout,
+            timeoutMsg: `expected video of ${endpointId} to be decoded in ${timeout / 1000}s by ${this.name}`
+        });
+    }
+
+    /**
+     * Waits until there are at least [number] participants that have at least one track.
+     *
+     * @param {number} number - The number of remote streams to wait for.
+     * @returns {Promise<boolean>}
+     */
+    async waitForRemoteStreams(number: number): Promise<boolean> {
+        return await this.driver.waitUntil(async () => await this.execute(
+            count => (APP?.conference?.getNumberOfParticipantsWithTracks() ?? -1) >= count,
+            number
+        ), {
+            timeout: 15_000,
+            timeoutMsg: `expected number of remote streams:${number} in 15s for ${this.name}`
+        });
+    }
+
+    /**
+     * Waits until the number of remote participants is exactly the given number.
+     *
+     * @param {number} number - The number of participant to wait for.
+     * @param {string} msg - A custom message to use.
+     * @returns {Promise<boolean>}
+     */
+    waitForParticipants(number: number, msg?: string): Promise<boolean> {
+        return this.driver.waitUntil(
+            () => this.execute(count => (window.APP?.conference?.listMembers()?.length ?? -1) === count, number),
+            {
+                timeout: 15_000,
+                timeoutMsg: msg || `not the expected participants ${number} in 15s for ${this.name}`
+            });
+    }
+
+    /**
+     * Returns the chat panel for this participant.
+     */
+    getChatPanel(): ChatPanel {
+        return new ChatPanel(this);
+    }
+
+    /**
+     * Returns the file sharing panel for this participant.
+     */
+    getFileSharingPanel(): FileSharingPanel {
+        return new FileSharingPanel(this);
+    }
+
+    /**
+     * Returns the BreakoutRooms for this participant.
+     *
+     * @returns {BreakoutRooms}
+     */
+    getBreakoutRooms(): BreakoutRooms {
+        return new BreakoutRooms(this);
+    }
+
+    /**
+     * Returns the toolbar for this participant.
+     *
+     * @returns {Toolbar}
+     */
+    getToolbar(): Toolbar {
+        return new Toolbar(this);
+    }
+
+    /**
+     * Returns the filmstrip for this participant.
+     *
+     * @returns {Filmstrip}
+     */
+    getFilmstrip(): Filmstrip {
+        return new Filmstrip(this);
+    }
+
+    /**
+     * Returns the invite dialog for this participant.
+     *
+     * @returns {InviteDialog}
+     */
+    getInviteDialog(): InviteDialog {
+        return new InviteDialog(this);
+    }
+
+    /**
+     * Returns the notifications.
+     */
+    getNotifications(): Notifications {
+        return new Notifications(this);
+    }
+
+    /**
+     * Returns the participants pane.
+     *
+     * @returns {ParticipantsPane}
+     */
+    getParticipantsPane(): ParticipantsPane {
+        return new ParticipantsPane(this);
+    }
+
+    /**
+     * Returns the large video page object.
+     *
+     * @returns {LargeVideo}
+     */
+    getLargeVideo(): LargeVideo {
+        return new LargeVideo(this);
+    }
+
+    /**
+     * Returns the videoQuality Dialog.
+     *
+     * @returns {VideoQualityDialog}
+     */
+    getVideoQualityDialog(): VideoQualityDialog {
+        return new VideoQualityDialog(this);
+    }
+
+    /**
+     * Returns the security Dialog.
+     *
+     * @returns {SecurityDialog}
+     */
+    getSecurityDialog(): SecurityDialog {
+        return new SecurityDialog(this);
+    }
+
+    /**
+     * Returns the settings Dialog.
+     *
+     * @returns {SettingsDialog}
+     */
+    getSettingsDialog(): SettingsDialog {
+        return new SettingsDialog(this);
+    }
+
+    /**
+     * Returns the password dialog.
+     */
+    getPasswordDialog(): PasswordDialog {
+        return new PasswordDialog(this);
+    }
+
+    /**
+     * Returns the virtual background dialog.
+     */
+    getVirtualBackgroundDialog(): VirtualBackgroundDialog {
+        return new VirtualBackgroundDialog(this);
+    }
+
+    /**
+     * Returns the unified recording & transcription dialog.
+     */
+    getRecordingTranscriptionDialog(): RecordingTranscriptionDialog {
+        return new RecordingTranscriptionDialog(this);
+    }
+
+    /**
+     * Returns the prejoin screen.
+     */
+    getPreJoinScreen(): PreJoinScreen {
+        return new PreJoinScreen(this);
+    }
+
+    /**
+     * Returns the lobby screen.
+     */
+    getLobbyScreen(): LobbyScreen {
+        return new LobbyScreen(this);
+    }
+
+    /**
+     * Returns the Visitors page object.
+     *
+     * @returns {Visitors}
+     */
+    getVisitors(): Visitors {
+        return new Visitors(this);
+    }
+
+
+    /**
+     * Switches to the main frame context (outside the iFrame; where the Jitsi Meet iFrame API is available).
+     *
+     * If this Participant was initialized with iFrameApi=false this is a no-op.
+     */
+    async switchToMainFrame() {
+        if (!this._iFrameApi || this._inMainFrame) {
+            return;
+        }
+
+        await this.driver.switchFrame(null);
+        this._inMainFrame = true;
+    }
+
+    /**
+     * Switches to the iFrame context (inside the iFrame; where the Jitsi Meet application runs).
+     *
+     * If this Participant was initialized with iFrameApi=false this is a no-op.
+     */
+    async switchToIFrame() {
+        if (!this._iFrameApi || !this._inMainFrame) {
+            return;
+        }
+
+        const iframe = this.driver.$('iframe');
+
+        // The External API inserts the iframe asynchronously after the wrapper page loads, so wait for it to exist
+        // before switching rather than failing immediately with "iframe doesn't exist" on slower backends.
+        await iframe.waitForExist({ timeout: 10_000 });
+
+        // Existing is not enough to switch into it. The iframe is created with its src already set, so the element
+        // is there while its document is still the initial about:blank, and switchFrame() pins whichever browsing
+        // context it finds at that moment - it resolves iframe.contentWindow to a context id and aims every later
+        // BiDi command at that id. The app document then replaces about:blank in a context of its own (the wrapper
+        // page is served from file://, so the app is always cross origin), and a switch that lands in the window in
+        // between leaves every following script call aimed at a context that no longer exists: no response, no
+        // error, and waitUntil cannot time out while its first evaluation is still pending. Waiting for the
+        // wrapper's jitsiAPI.test, which it sets from the External API's onload, puts the switch after the app
+        // document has loaded.
+        try {
+            await this.driver.waitUntil(
+                // @ts-ignore
+                () => this.execute(() => Boolean(window.jitsiAPI?.test)),
+                {
+                    timeout: 30_000,
+                    timeoutMsg: `Timeout waiting for the iframe API to load for ${this._name}.`
+                }
+            );
+        } catch (e) {
+            this._iframeUnreachable = true;
+            throw e;
+        }
+
+        const MAX_ATTEMPTS = 3;
+
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            // Re-select the iframe right before switching rather than reusing the handle fetched above: the
+            // wait for jitsiAPI.test can itself take up to 30s, and switchFrame() pins whatever browsing
+            // context the handle resolves to at that moment, so a stale handle reintroduces the same class of
+            // bug the wait above exists to avoid.
+            await this.driver.switchFrame(this.driver.$('iframe'));
+            this._inMainFrame = false;
+
+            // A switch can still land on a context that never answers. Traced on a rejoin in the same tab: the
+            // context id was the right one (it matched browsingContext.getTree, and the classic switch into the
+            // frame succeeded), but Chrome's BiDi mapper never got an execution context for that frame, so every
+            // script sent into it, including wdio's own polyfill injection right after the frame was created,
+            // waited until the page was torn down and then failed with "execution contexts cleared". That looks
+            // identical to a context about to be replaced (e.g. an internal redirect inside the app): no response,
+            // no error. Confirm the context is actually alive before trusting it, with a short bound: a live one
+            // answers in milliseconds, and a dead one never does, whatever the timeout.
+            const alive = await this._executeWithin(IFRAME_PROBE_TIMEOUT, () => document.readyState === 'complete')
+                .catch(() => false);
+
+            if (alive) {
+                return;
+            }
+
+            this._inMainFrame = true;
+            await this.driver.switchFrame(null);
+
+            if (attempt === MAX_ATTEMPTS) {
+                this._iframeUnreachable = true;
+                throw new Error(`Switched into a dead iframe context for ${this._name} after ${
+                    MAX_ATTEMPTS} attempts.`);
+            }
+        }
+    }
+
+    /**
+     * Whether switchToIFrame() has already given up on this participant's iframe. See _iframeUnreachable.
+     */
+    get isIframeUnreachable(): boolean {
+        return this._iframeUnreachable;
+    }
+
+    /**
+     * Returns the iframe API for this participant.
+     */
+    getIframeAPI() {
+        return new IframeAPI(this);
+    }
+
+    async getRoomMetadata() {
+        return this.execute(() => window.APP?.conference?._room?.getMetadataHandler()?.getMetadata());
+    }
+
+    /**
+     * Hangups the participant by leaving the page. base.html is an empty page on all deployments.
+     */
+    async hangup() {
+        console.log(`Hanging up (${this.name})`);
+        if ((await this.driver.getUrl()).endsWith('/base.html')) {
+            console.log(`Already hung up (${this.name})`);
+
+            return;
+        }
+
+        if (this._loadTest) {
+            // The load-test client leaves the room and disconnects from its unload handler, so navigating away
+            // is the hangup. There is no iframe to switch out of either.
+            await this.driver.url('/base.html');
+            console.log(`Hung up (${this.name})`);
+
+            return;
+        }
+
+        // @ts-ignore
+        await this.execute(() => window.APP?.conference?.hangup());
+
+        // Wait until _room is unset, which is one of the last things hangup() does.
+        await this.driver.waitUntil(
+            async () => {
+                try {
+                    // @ts-ignore
+                    return await this.driver.execute(() => window.APP?.conference?._room === undefined);
+                } catch (e) {
+                    // There seems to be a race condition with hangup() causing the page to change, and execute()
+                    // might fail with a Bidi error. Retry.
+                    return false;
+                }
+            },
+            {
+                timeout: 8000,
+                timeoutMsg: `${this.name} failed to hang up`
+            }
+        );
+        console.log(`Hung up (${this.name})`);
+
+        // If the driver is currently focused on an iframe (iFrameApi mode), switch back to the
+        // top-level context before navigating away. Otherwise driver.url() targets the iframe
+        // browsing context instead of the outer page, which leaves the outer page still at the
+        // conference URL and puts the driver in a broken state for any subsequent ensureOneParticipant call.
+        await this.switchToMainFrame();
+
+        // driver.url() can silently fail to land on /base.html (the known pre-wdio-v9.9.1 BiDi bug
+        // the catch below guards against, or any other transient navigation error) - swallowing that
+        // unconditionally previously let hangup() return as if it succeeded while the page was still
+        // on the conference. The next ensureOneParticipant call then sees alreadyOnBasePage === false
+        // and falls into the expensive switchToIFrame() fallback right when the page is least stable,
+        // which is the same class of "no response, no error" context-pinning failure documented on
+        // switchToIFrame() itself. Verify we actually got there and retry a bounded number of times
+        // instead of trusting a swallowed exception.
+        const MAX_ATTEMPTS = 3;
+
+        for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            await this.driver.url('/base.html')
+
+                // This was fixed in wdio v9.9.1, we can drop once we update to that version
+                .catch(_ => {}); // eslint-disable-line @typescript-eslint/no-empty-function
+
+            if ((await this.driver.getUrl()).endsWith('/base.html')) {
+                return;
+            }
+
+            if (attempt === MAX_ATTEMPTS) {
+                throw new Error(`${this.name} failed to navigate to /base.html after hanging up, `
+                    + `after ${MAX_ATTEMPTS} attempts.`);
+            }
+        }
+    }
+
+    /**
+     * Returns the local display name element.
+     * @private
+     */
+    private async getLocalDisplayNameElement() {
+        const localVideoContainer = this.driver.$('span[id="localVideoContainer"]');
+
+        await localVideoContainer.moveTo();
+
+        return localVideoContainer.$('span[id="localDisplayName"]');
+    }
+
+    /**
+     * Returns the local display name.
+     */
+    async getLocalDisplayName() {
+        return (await this.getLocalDisplayNameElement()).getText();
+    }
+
+    /**
+     * Sets the display name of the local participant.
+     */
+    async setLocalDisplayName(displayName: string) {
+        const localDisplayName = await this.getLocalDisplayNameElement();
+
+        await localDisplayName.click();
+
+        await this.driver.keys(displayName);
+        await this.driver.keys(Key.Return);
+
+        // just click somewhere to lose focus, to make sure editing has ended
+        const localVideoContainer = this.driver.$('span[id="localVideoContainer"]');
+
+        await localVideoContainer.moveTo();
+        await localVideoContainer.click();
+    }
+
+    /**
+     * Gets avatar SRC attribute for the one displayed on local video thumbnail.
+     */
+    async getLocalVideoAvatar() {
+        const avatar
+            = this.driver.$('//span[@id="localVideoContainer"]//img[contains(@class,"userAvatar")]');
+
+        return await avatar.isExisting() ? await avatar.getAttribute('src') : null;
+    }
+
+    /**
+     * Makes sure that the avatar is displayed in the local thumbnail and that the video is not displayed.
+     * There are 3 options for avatar:
+     *  - defaultAvatar: true - the default avatar (with grey figure) is used
+     *  - image: true - the avatar is an image set in the settings
+     *  - defaultAvatar: false, image: false - the avatar is produced from the initials of the display name
+     */
+    async assertThumbnailShowsAvatar(
+            participant: Participant, reverse = false, defaultAvatar = false, image = false): Promise<void> {
+        const id = participant === this
+            ? 'localVideoContainer' : `participant_${await participant.getEndpointId()}`;
+
+        const xpath = defaultAvatar
+            ? `//span[@id='${id}']//div[contains(@class,'userAvatar') and contains(@class, 'defaultAvatar')]`
+            : `//span[@id="${id}"]//${image ? 'img' : 'div'}[contains(@class,"userAvatar")]`;
+
+        await this.driver.$(xpath).waitForDisplayed({
+            reverse,
+            timeout: 2000,
+            timeoutMsg: `Avatar is ${reverse ? '' : 'not'} displayed in the local thumbnail for ${participant.name}`
+        });
+
+        await this.driver.$(`//span[@id="${id}"]//video`).waitForDisplayed({
+            reverse: !reverse,
+            timeout: 2000,
+            timeoutMsg: `Video is ${reverse ? 'not' : ''} displayed in the local thumbnail for ${participant.name}`
+        });
+    }
+
+    /**
+     * Makes sure that the default avatar is used.
+     */
+    async assertDefaultAvatarExist(participant: Participant): Promise<void> {
+        const id = participant === this
+            ? 'localVideoContainer' : `participant_${await participant.getEndpointId()}`;
+
+        await this.driver.$(
+            `//span[@id='${id}']//div[contains(@class,'userAvatar') and contains(@class, 'defaultAvatar')]`)
+            .waitForExist({
+                timeout: 2000,
+                timeoutMsg: `Default avatar does not exist for ${participant.name}`
+            });
+    }
+
+    /**
+     * Makes sure that the local video is displayed in the local thumbnail and that the avatar is not displayed.
+     */
+    async asserLocalThumbnailShowsVideo(): Promise<void> {
+        await this.assertThumbnailShowsAvatar(this, true);
+    }
+
+    /**
+     * Make sure a display name is visible on the stage.
+     * @param value
+     */
+    async assertDisplayNameVisibleOnStage(value: string) {
+        const displayNameEl = this.driver.$('div[data-testid="stage-display-name"]');
+
+        expect(await displayNameEl.isDisplayed()).toBe(true);
+        expect(await displayNameEl.getText()).toBe(value);
+    }
+
+    /**
+     * Checks if the leave reason dialog is open.
+     */
+    async isLeaveReasonDialogOpen() {
+        return this.driver.$('div[data-testid="dialog.leaveReason"]').isDisplayed();
+    }
+
+    /**
+     * Returns the audio level for a participant.
+     *
+     * @param p
+     * @return
+     */
+    async getRemoteAudioLevel(p: Participant) {
+        const jid = await p.getEndpointId();
+
+        return await this.execute(id => {
+            const level = APP?.conference?.getPeerSSRCAudioLevel(id);
+
+            return level ? level.toFixed(2) : null;
+        }, jid);
+    }
+
+    /**
+     * For the participant to have his audio muted/unmuted from given observer's
+     * perspective. The method will fail the test if something goes wrong or
+     * the audio muted status is different than the expected one. We wait up to
+     * 3 seconds for the expected status to appear.
+     *
+     * @param testee - instance of the participant for whom we're checking the audio muted status.
+     * @param muted - <tt>true</tt> to wait for audio muted status or <tt>false</tt> to wait for the participant to
+     * unmute.
+     */
+    async waitForAudioMuted(testee: Participant, muted: boolean): Promise<void> {
+        // Waits for the correct icon
+        await this.getFilmstrip().assertAudioMuteIconIsDisplayed(testee, !muted);
+
+        // Extended timeout for 'unmuted' to make tests more resilient to
+        // unexpected glitches.
+        const timeout = muted ? 3_000 : 6_000;
+
+        // Give it 3 seconds to not get any audio or to receive some
+        // depending on "muted" argument
+        try {
+            await this.driver.waitUntil(async () => {
+                const audioLevel = await this.getRemoteAudioLevel(testee);
+
+                if (muted) {
+                    if (audioLevel !== null && audioLevel > 0.1) {
+                        console.log(`muted exiting on: ${audioLevel}`);
+
+                        return true;
+                    }
+
+                    return false;
+                }
+
+                // When testing for unmuted we wait for first sound
+                if (audioLevel !== null && audioLevel > 0.1) {
+                    console.log(`unmuted exiting on: ${audioLevel}`);
+
+                    return true;
+                }
+
+                return false;
+            },
+            { timeout });
+
+            // When testing for muted we don't want to have
+            // the condition succeeded
+            if (muted) {
+                assert.fail(`There was some sound coming from muted: '${this.name}'`);
+            } // else we're good for unmuted participant
+        } catch (_timeoutE) {
+            if (!muted) {
+                assert.fail(`There was no sound from unmuted: '${this.name}'`);
+            } // else we're good for muted participant
+        }
+    }
+
+    /**
+     * Checks if video is currently received for the given remote endpoint ID (there is a track, it's not muted,
+     * and it's streaming status according to the connection-indicator is active).
+     */
+    async isRemoteVideoReceived(endpointId: string): Promise<boolean> {
+        return this.execute(e => JitsiMeetJS.app.testing.isRemoteVideoReceived(e), endpointId);
+    }
+
+    /**
+     * Checks if the remove video is displayed for the given remote endpoint ID.
+     * @param endpointId
+     */
+    async isRemoteVideoDisplayed(endpointId: string): Promise<boolean> {
+        return this.driver.$(
+            `//span[@id="participant_${endpointId}" and contains(@class, "display-video")]`).isExisting();
+    }
+
+    /**
+     * Check if remote video for a specific remote endpoint is both received and displayed.
+     * @param endpointId
+     */
+    async isRemoteVideoReceivedAndDisplayed(endpointId: string): Promise<boolean> {
+        return await this.isRemoteVideoReceived(endpointId) && await this.isRemoteVideoDisplayed(endpointId);
+    }
+
+    /**
+     * Waits for a specific participant to be displayed on large video.
+     *
+     * @param {string} expectedEndpointId - The endpoint ID of the participant expected on large video.
+     * @param {string} timeoutMsg - Optional custom timeout message.
+     * @param {number} timeout - Optional timeout in milliseconds (default: 30000).
+     * @returns {Promise<void>}
+     */
+    async waitForParticipantOnLargeVideo(
+            expectedEndpointId: string,
+            timeoutMsg?: string,
+            timeout: number = 30_000): Promise<void> {
+        await this.driver.waitUntil(
+            async () => await this.getLargeVideo().getResource() === expectedEndpointId,
+            {
+                timeout,
+                timeoutMsg: timeoutMsg || `Expected ${expectedEndpointId} on large video for ${this.name}`
+            });
+    }
+
+    /**
+     * Waits for remote video state - receiving and displayed.
+     * @param endpointId
+     * @param reverse if true, waits for the remote video to NOT be received AND NOT displayed.
+     */
+    async waitForRemoteVideo(endpointId: string, reverse = false) {
+        if (reverse) {
+            await this.driver.waitUntil(async () =>
+                !await this.isRemoteVideoReceived(endpointId) && !await this.isRemoteVideoDisplayed(endpointId), {
+                timeout: 15_000,
+                timeoutMsg: `expected remote video for ${endpointId} to not be received 15s by ${this.name}`
+            });
+        } else {
+            await this.driver.waitUntil(async () =>
+                await this.isRemoteVideoReceivedAndDisplayed(endpointId), {
+                timeout: 15_000,
+                timeoutMsg: `expected remote video for ${endpointId} to be received 15s by ${this.name}`
+            });
+        }
+    }
+
+    /**
+     * Waits for ninja icon to be displayed.
+     * @param endpointId When no endpoint id is passed we check for any ninja icon.
+     */
+    async waitForNinjaIcon(endpointId?: string) {
+        if (endpointId) {
+            await this.driver.$(`//span[@id='participant_${endpointId}']//span[@class='connection_ninja']`)
+                .waitForDisplayed({
+                    timeout: 15_000,
+                    timeoutMsg: `expected ninja icon for ${endpointId} to be displayed in 15s by ${this.name}`
+                });
+        } else {
+            await this.driver.$('//span[contains(@class,"videocontainer")]//span[contains(@class,"connection_ninja")]')
+                .waitForDisplayed({
+                    timeout: 5_000,
+                    timeoutMsg: `expected ninja icon to be displayed in 5s by ${this.name}`
+                });
+        }
+    }
+
+    /**
+     * Waits for dominant speaker icon to appear in remote video of a participant.
+     * @param endpointId the endpoint ID of the participant whose dominant speaker icon status will be checked.
+     */
+    waitForDominantSpeaker(endpointId: string) {
+        return this.driver.$(`//span[@id="participant_${endpointId}" and contains(@class, "dominant-speaker")]`)
+            .waitForDisplayed({ timeout: 5_000 });
+    }
+
+    /**
+     * Returns the token that this participant was initialized with.
+     */
+    getToken(): IToken | undefined {
+        return this._token;
+    }
+
+    /**
+     * Gets the dial in pin for the conference. Reads it from the invite dialog if the pin hasn't been cached yet.
+     */
+    async getDialInPin(): Promise<string> {
+        if (!this._dialInPin) {
+            const dialInPin = await this.getInviteDialog().getPinNumber();
+
+            await this.getInviteDialog().clickCloseButton();
+
+            this._dialInPin = dialInPin;
+        }
+
+        return this._dialInPin;
+    }
+}

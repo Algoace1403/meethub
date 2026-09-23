@@ -1,0 +1,61 @@
+.premeeting-screen {
+    #new-toolbox {
+        bottom: 0;
+        position: relative;
+        transition: none;
+
+        .toolbox-content {
+            margin-bottom: 4px;
+        }
+
+        .toolbox-content-items {
+            @include ltr;
+            background: transparent;
+            box-shadow: none;
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+        }
+
+        .toolbox-content,
+        .toolbox-content-wrapper,
+        .toolbox-content-items {
+            box-sizing: border-box;
+            width: auto;
+        }
+    }
+
+    @media (max-width: 400px) {
+        .device-status-error {
+            border-radius: 0;
+            margin: 0 -16px;
+        }
+    }
+}
+
+#preview {
+    background: var(--prejoin-preview-background, #040404);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    width: 100%;
+
+    .avatar {
+        text {
+            fill: white;
+        }
+    }
+
+    video {
+        height: 100%;
+        object-fit: cover;
+        width: 100%;
+    }
+}
+
+@mixin flex-centered() {
+    align-items: center;
+    display: flex;
+    justify-content: center;
+}
