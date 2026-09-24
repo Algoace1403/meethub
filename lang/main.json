@@ -675,7 +675,7 @@
         "answer": "Answer",
         "audioCallTitle": "Incoming call",
         "decline": "Dismiss",
-        "productLabel": "from Jitsi Meet",
+        "productLabel": "from Meet Hub",
         "videoCallTitle": "Incoming video call"
     },
     "info": {
@@ -1831,7 +1831,7 @@
         "go": "GO",
         "goSmall": "GO",
         "headerSubtitle": "Secure and high quality meetings",
-        "headerTitle": "Jitsi Meet",
+        "headerTitle": "Meet Hub",
         "info": "Dial-in info",
         "jitsiOnMobile": "Jitsi on mobile – download our apps and start a meeting from anywhere",
         "join": "CREATE / JOIN",
@@ -1869,5 +1869,33 @@
             "heading": "Whiteboard"
         },
         "screenTitle": "Whiteboard"
+    },
+    "welcomeRefresh": {
+        "navigation": "Main navigation",
+        "meet": "Meet",
+        "howItWorks": "How it works",
+        "eyebrow": "LESS DISTANCE. MORE CONNECTION.",
+        "title": "Good conversations",
+        "titleAccent": "start here.",
+        "description": "Bring your people together. A quick catch-up, a big idea, or just a hello — make room for what matters.",
+        "roomLabel": "Give your meeting a name",
+        "roomPlaceholder": "e.g. Friday catch-up",
+        "roomHint": "Use a unique room name, then share the link to invite your people.",
+        "visualEyebrow": "YOUR PEOPLE, A LITTLE CLOSER",
+        "visualCaption": "Different places. Same room.",
+        "browser": "Right in your browser",
+        "openSource": "Built on open source",
+        "share": "One link brings everyone together",
+        "simple": "A SMALL LINK. A BIG CONNECTION.",
+        "howTitle": "From “hello” to here. In three steps.",
+        "createTitle": "Make a little room.",
+        "createDescription": "Choose a unique name and start your meeting. Your space is ready when you are.",
+        "inviteTitle": "Send an invitation.",
+        "inviteDescription": "Copy your meeting link and send it to the people you want to bring together.",
+        "connectTitle": "Be there, together.",
+        "connectDescription": "Check your camera and mic, join the conversation, and let the good ideas flow.",
+        "yourSpace": "Pick up where you left off.",
+        "footer": "Made for connection. Powered by Jitsi.",
+        "source": "Explore the open source"
     }
 }
