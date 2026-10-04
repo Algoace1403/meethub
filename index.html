@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta http-equiv="content-type" content="text/html;charset=utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-    <meta name="theme-color" content="#2A3A4B">
+    <meta name="theme-color" content="#244D3B">
     <!--#include virtual="base.html" -->
 
     <link rel="apple-touch-icon" href="images/apple-touch-icon.png">
@@ -25,7 +25,7 @@
         window.EXCALIDRAW_ASSET_PATH = 'libs/excalidraw/';
         // Dynamically generate the manifest location URL. It must be served from the document origin, and we may have
         // the base pointing to the CDN. This way we can generate a full URL which will bypass the base.
-        document.querySelector('#manifest-placeholder').setAttribute('href', window.location.origin + contextRoot(window.location.pathname) + 'manifest.json');
+        document.querySelector('#manifest-placeholder').setAttribute('href', window.location.origin + contextRoot(window.location.pathname) + 'static/meet-hub.webmanifest');
 
         document.addEventListener('DOMContentLoaded', () => {
             if (!JitsiMeetJS.app) {
