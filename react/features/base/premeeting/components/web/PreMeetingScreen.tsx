@@ -108,12 +108,17 @@ const useStyles = makeStyles()(theme => {
             height: '100%',
             position: 'absolute',
             inset: '0 0 0 0',
+            boxSizing: 'border-box',
+            padding: '24px',
+            gap: '24px',
             display: 'flex',
             backgroundColor: theme.palette.preMeetingBackground,
             zIndex: 252,
 
             '@media (max-width: 720px)': {
-                flexDirection: 'column-reverse'
+                flexDirection: 'column-reverse',
+                padding: '12px',
+                gap: '12px'
             }
         },
         content: {
@@ -123,6 +128,10 @@ const useStyles = makeStyles()(theme => {
             flexShrink: 0,
             boxSizing: 'border-box',
             padding: '24px 0 16px',
+            border: '1px solid #344C3E',
+            borderRadius: '20px',
+            backgroundColor: '#192922',
+            overflowY: 'auto',
             position: 'relative',
             width: '400px',
             height: '100%',
@@ -130,7 +139,8 @@ const useStyles = makeStyles()(theme => {
 
             '@media (max-width: 720px)': {
                 height: 'auto',
-                margin: '0 auto'
+                margin: '0 auto',
+                maxWidth: '100%'
             },
 
             // mobile phone landscape
