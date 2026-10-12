@@ -5,7 +5,6 @@ import { isMobileBrowser } from '../../base/environment/utils';
 import { translate, translateToHTML } from '../../base/i18n/functions';
 import Icon from '../../base/icons/components/Icon';
 import { IconWarning } from '../../base/icons/svg';
-import Watermarks from '../../base/react/components/web/Watermarks';
 import getUnsafeRoomText from '../../base/util/getUnsafeRoomText.web';
 import CalendarList from '../../calendar-sync/components/CalendarList.web';
 import RecentList from '../../recent-list/components/RecentList.web';
@@ -146,6 +145,7 @@ class WelcomePage extends AbstractWelcomePage<IProps> {
         super.componentDidMount();
 
         document.body.classList.add('welcome-page');
+        document.documentElement.classList.add('welcome-page');
         document.title = interfaceConfig.APP_NAME;
 
         if (this.state.generateRoomNames) {
@@ -180,6 +180,7 @@ class WelcomePage extends AbstractWelcomePage<IProps> {
         super.componentWillUnmount();
 
         document.body.classList.remove('welcome-page');
+        document.documentElement.classList.remove('welcome-page');
     }
 
     /**
@@ -190,116 +191,209 @@ class WelcomePage extends AbstractWelcomePage<IProps> {
      */
     override render() {
         const { _moderatedRoomServiceUrl, t } = this.props;
-        const { DEFAULT_WELCOME_PAGE_LOGO_URL, DISPLAY_WELCOME_FOOTER } = interfaceConfig;
+        const { DISPLAY_WELCOME_FOOTER } = interfaceConfig;
         const showAdditionalCard = this._shouldShowAdditionalCard();
         const showAdditionalContent = this._shouldShowAdditionalContent();
         const showAdditionalToolbarContent = this._shouldShowAdditionalToolbarContent();
         const contentClassName = showAdditionalContent ? 'with-content' : 'without-content';
         const footerClassName = DISPLAY_WELCOME_FOOTER ? 'with-footer' : 'without-footer';
+        const meetingTabs = this._renderTabs();
 
         return (
             <div
                 className = { `welcome ${contentClassName} ${footerClassName}` }
                 id = 'welcome_page'>
-                <div className = 'header'>
-                    <div className = 'header-image' />
-                    <div className = 'header-container'>
-                        <div className = 'header-watermark-container'>
-                            <div className = 'welcome-watermark'>
-                                <Watermarks
-                                    defaultJitsiLogoURL = { DEFAULT_WELCOME_PAGE_LOGO_URL }
-                                    noMargins = { true } />
-                            </div>
-                        </div>
-                        <div className = 'welcome-page-settings'>
-                            <SettingsButton
-                                defaultTab = { SETTINGS_TABS.CALENDAR }
-                                isDisplayedOnWelcomePage = { true } />
-                            {showAdditionalToolbarContent
-                                ? <div
-                                    className = 'settings-toolbar-content'
-                                    ref = { this._setAdditionalToolbarContentRef } />
-                                : null
-                            }
-                        </div>
-                        <h1 className = 'header-text-title'>
-                            {t('welcomepage.headerTitle')}
-                        </h1>
-                        <span className = 'header-text-subtitle'>
-                            {t('welcomepage.headerSubtitle')}
-                        </span>
-                        <div id = 'enter_room'>
-                            <div className = 'join-meeting-container'>
-                                <div className = 'enter-room-input-container'>
-                                    <form onSubmit = { this._onFormSubmit }>
-                                        <input
-                                            aria-disabled = 'false'
-                                            aria-label = { t('welcomepage.accessibilityLabel.roomname') }
-                                            autoFocus = { true }
-                                            className = 'enter-room-input'
-                                            id = 'enter_room_field'
-                                            onChange = { this._onRoomChange }
-                                            pattern = { ROOM_NAME_VALIDATE_PATTERN_STR }
-                                            placeholder = { this.state.roomPlaceholder }
-                                            ref = { this._setRoomInputRef }
-                                            type = 'text'
-                                            value = { this.state.room } />
-                                    </form>
-                                </div>
-
-                                <button
-                                    aria-disabled = 'false'
-                                    aria-label = { t('welcomepage.startMeeting') }
-                                    className = 'welcome-page-button'
-                                    id = 'enter_room_button'
-                                    onClick = { this._onFormSubmit }
-                                    tabIndex = { 0 }
-                                    type = 'button'>
-                                    {t('welcomepage.startMeeting')}
-                                </button>
-                            </div>
-                        </div>
-                        {this._titleHasNotAllowCharacter && (
-                            <div
-                                className = 'not-allow-title-character-div'
-                                role = 'alert'>
-                                <Icon src = { IconWarning } />
-                                <span className = 'not-allow-title-character-text'>
-                                    {t('welcomepage.roomNameAllowedChars')}
-                                </span>
-                            </div>
-                        )}
-                        {this._renderInsecureRoomNameWarning()}
-
-                        {_moderatedRoomServiceUrl && (
-                            <div id = 'moderated-meetings'>
-                                {
-                                    translateToHTML(
-                                        t, 'welcomepage.moderatedMessage', { url: _moderatedRoomServiceUrl })
-                                }
-                            </div>)}
-                    </div>
-                </div>
-
-                <div className = 'welcome-cards-container'>
-                    <div className = 'welcome-card-column'>
-                        <WelcomePageNotification />
-                        <div className = 'welcome-tabs welcome-card welcome-card--blue'>
-                            {this._renderTabs()}
-                        </div>
-                        {showAdditionalCard
+                <nav
+                    aria-label = { t('welcomeRefresh.navigation') }
+                    className = 'refresh-nav'>
+                    <a
+                        aria-label = { interfaceConfig.APP_NAME }
+                        className = 'refresh-brand'
+                        href = './'>
+                        <img
+                            alt = ''
+                            height = '38'
+                            src = './images/favicon.svg'
+                            width = '38' />
+                        <span>Meet<span className = 'refresh-brand-light'> Hub</span></span>
+                    </a>
+                    <div className = 'refresh-nav-links'>
+                        <a
+                            className = 'refresh-nav-active'
+                            href = '#enter_room'>{t('welcomeRefresh.meet')}</a>
+                        <a href = '#how-it-works'>{t('welcomeRefresh.howItWorks')}</a>
+                        <span className = 'refresh-nav-divider' />
+                        <SettingsButton
+                            defaultTab = { SETTINGS_TABS.CALENDAR }
+                            isDisplayedOnWelcomePage = { true } />
+                        {showAdditionalToolbarContent
                             ? <div
-                                className = 'welcome-card welcome-card--dark'
-                                ref = { this._setAdditionalCardRef } />
+                                className = 'settings-toolbar-content'
+                                ref = { this._setAdditionalToolbarContentRef } />
                             : null}
                     </div>
+                </nav>
+                <main className = 'refresh-main'>
+                    <div className = 'refresh-hero'>
+                        <section className = 'refresh-intro'>
+                            <div className = 'refresh-eyebrow'>
+                                <span className = 'refresh-status-dot' />
+                                {t('welcomeRefresh.eyebrow')}
+                            </div>
+                            <h1 className = 'refresh-title'>
+                                {t('welcomeRefresh.title')}<br />
+                                <em>{t('welcomeRefresh.titleAccent')}</em>
+                            </h1>
+                            <p className = 'refresh-description'>{t('welcomeRefresh.description')}</p>
+                            <label
+                                className = 'refresh-input-label'
+                                htmlFor = 'enter_room_field'>
+                                {t('welcomeRefresh.roomLabel')}
+                            </label>
+                            <div id = 'enter_room'>
+                                <form
+                                    className = 'refresh-join-form'
+                                    onSubmit = { this._onFormSubmit }>
+                                    <span
+                                        aria-hidden = 'true'
+                                        className = 'refresh-room-icon'>
+                                        <svg
+                                            fill = 'none'
+                                            viewBox = '0 0 24 24'>
+                                            <rect
+                                                height = '12'
+                                                rx = '3'
+                                                stroke = 'currentColor'
+                                                strokeWidth = '1.7'
+                                                width = '13'
+                                                x = '3'
+                                                y = '6' />
+                                            <path
+                                                d = 'm16 10 5-3v10l-5-3'
+                                                stroke = 'currentColor'
+                                                strokeLinejoin = 'round'
+                                                strokeWidth = '1.7' />
+                                        </svg>
+                                    </span>
+                                    <input
+                                        aria-describedby = 'refresh-room-hint'
+                                        aria-label = { t('welcomepage.accessibilityLabel.roomname') }
+                                        autoComplete = 'off'
+                                        className = 'refresh-room-input'
+                                        id = 'enter_room_field'
+                                        onChange = { this._onRoomChange }
+                                        pattern = { ROOM_NAME_VALIDATE_PATTERN_STR }
+                                        placeholder = { this.state.roomPlaceholder || t('welcomeRefresh.roomPlaceholder') }
+                                        ref = { this._setRoomInputRef }
+                                        type = 'text'
+                                        value = { this.state.room } />
+                                    <button
+                                        className = 'refresh-start-button'
+                                        id = 'enter_room_button'
+                                        type = 'submit'>
+                                        {t('welcomepage.startMeeting')}
+                                        <span aria-hidden = 'true'>↗</span>
+                                    </button>
+                                </form>
+                            </div>
+                            <p
+                                className = 'refresh-room-hint'
+                                id = 'refresh-room-hint'>
+                                {t('welcomeRefresh.roomHint')}
+                            </p>
+                            {this._titleHasNotAllowCharacter && (
+                                <div
+                                    className = 'not-allow-title-character-div'
+                                    role = 'alert'>
+                                    <Icon src = { IconWarning } />
+                                    <span className = 'not-allow-title-character-text'>
+                                        {t('welcomepage.roomNameAllowedChars')}
+                                    </span>
+                                </div>
+                            )}
+                            {this._renderInsecureRoomNameWarning()}
 
-                    {showAdditionalContent
-                        ? <div
-                            className = 'welcome-page-content'
-                            ref = { this._setAdditionalContentRef } />
-                        : null}
-                </div>
+                            {_moderatedRoomServiceUrl && (
+                                <div id = 'moderated-meetings'>
+                                    {
+                                        translateToHTML(
+                                        t, 'welcomepage.moderatedMessage', { url: _moderatedRoomServiceUrl })
+                                    }
+                                </div>)}
+                        </section>
+                        <div
+                            aria-hidden = 'true'
+                            className = 'refresh-visual'>
+                            <div className = 'refresh-visual-topline'>
+                                <span>{t('welcomeRefresh.visualEyebrow')}</span>
+                                <span className = 'refresh-sparkle'>✳</span>
+                            </div>
+                            <img
+                                alt = ''
+                                className = 'refresh-conversation'
+                                src = './images/welcome-conversation.svg' />
+                            <div className = 'refresh-visual-caption'>
+                                <span>{t('welcomeRefresh.visualCaption')}</span>
+                                <span className = 'refresh-visual-avatars'><i>J</i><i>M</i><i>+1</i></span>
+                            </div>
+                        </div>
+                    </div>
+                    <div className = 'refresh-benefits'>
+                        <span><i aria-hidden = 'true'>◎</i>{t('welcomeRefresh.browser')}</span>
+                        <span><i aria-hidden = 'true'>◇</i>{t('welcomeRefresh.openSource')}</span>
+                        <span><i aria-hidden = 'true'>↗</i>{t('welcomeRefresh.share')}</span>
+                    </div>
+                    <section
+                        aria-labelledby = 'refresh-how-title'
+                        className = 'refresh-how'
+                        id = 'how-it-works'>
+                        <div className = 'refresh-section-heading'>
+                            <span className = 'refresh-eyebrow'>{t('welcomeRefresh.simple')}</span>
+                            <h2 id = 'refresh-how-title'>{t('welcomeRefresh.howTitle')}</h2>
+                        </div>
+                        <div className = 'refresh-steps'>
+                            {[ 'create', 'invite', 'connect' ].map((step, index) => (
+                                <article
+                                    className = 'refresh-step'
+                                    key = { step }>
+                                    <span className = 'refresh-step-number'>0{index + 1}</span>
+                                    <h3>{t(`welcomeRefresh.${step}Title`)}</h3>
+                                    <p>{t(`welcomeRefresh.${step}Description`)}</p>
+                                </article>
+                            ))}
+                        </div>
+                    </section>
+                    <div className = 'welcome-cards-container'>
+
+                        <div className = 'welcome-card-column'>
+                            <WelcomePageNotification />
+                            {meetingTabs && <section className = 'welcome-tabs welcome-card welcome-card--blue'>
+                                <h2 className = 'refresh-recent-title'>{t('welcomeRefresh.yourSpace')}</h2>
+                                {meetingTabs}
+                            </section>}
+                            {showAdditionalCard
+                                ? <div
+                                    className = 'welcome-card welcome-card--dark'
+                                    ref = { this._setAdditionalCardRef } />
+                                : null}
+                        </div>
+
+                        {showAdditionalContent
+                            ? <div
+                                className = 'welcome-page-content'
+                                ref = { this._setAdditionalContentRef } />
+                            : null}
+                    </div>
+                </main>
+                <footer className = 'refresh-footer'>
+                    <span>{t('welcomeRefresh.footer')}</span>
+                    <a
+                        href = 'https://github.com/jitsi/jitsi-meet'
+                        rel = 'noopener noreferrer'
+                        target = '_blank'>
+                        {t('welcomeRefresh.source')} <span aria-hidden = 'true'>↗</span>
+                    </a>
+                </footer>
                 {DISPLAY_WELCOME_FOOTER && this._renderFooter()}
             </div>
 
