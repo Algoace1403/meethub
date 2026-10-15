@@ -148,3 +148,20 @@ body.welcome-page { height: auto; min-height: 100dvh; overflow: visible; backgro
     @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition: none !important; animation: none !important; } }
 }
 
+// Keep the pre-join screen and conference controls consistent with the welcome page.
+.premeeting-screen #preview { border-radius: 20px; overflow: hidden; }
+.premeeting-screen #new-toolbox .toolbox-content-items { border-radius: 16px; }
+#new-toolbox .toolbox-content-items { border-radius: 18px; }
+
+.premeeting-screen #preview { min-width: 0; }
+@media (max-width: 720px) {
+    .premeeting-screen {
+        overflow-y: auto;
+        flex-direction: column;
+        #preview { order: -1; height: 40dvh; min-height: 200px; flex: 0 0 40dvh; }
+        > div:not(#preview) { flex-shrink: 0; }
+    }
+}
+
+// Wordmark for the Meet Hub fork.
+.leftwatermark { width: 142px; }
