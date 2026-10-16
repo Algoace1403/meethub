@@ -79,3 +79,6 @@ $flagsImagePath: "../images/";
 @import 'time_timer';
 
 /* Modules END */
+
+// Web UI refresh, kept separate from the conferencing layout.
+@import 'refresh';
