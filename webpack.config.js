@@ -325,7 +325,7 @@ function getDevServerConfig() {
             }
         },
         allowedHosts: 'all',
-        host: 'localhost',
+        host: process.env.WEBPACK_DEV_SERVER_HOST || 'localhost',
         hot: true,
         proxy: [
             {
