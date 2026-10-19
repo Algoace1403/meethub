@@ -54,3 +54,15 @@ git diff --check
 The development build compiles with `npm start`. Browser review screenshots are stored as `local-preview-desktop.png`, `local-preview-mobile.png`, `local-preview-prejoin.png`, `local-preview-prejoin-mobile.png`, and `local-preview-meeting.png` after validation.
 
 Validation completed on 23 October 2026: the webpack development bundles and web TypeScript check passed, and ESLint reported no warnings for changed components. Chrome checks covered desktop and 390 px mobile layouts, scrolling, the settings dialog, invalid room names, keyboard submission, pre-join controls, joining the development backend, camera and microphone toggles, and opening chat. No page JavaScript errors occurred. Media checks used Chrome's synthetic devices; real hardware and end-to-end multi-party media were not tested.
+
+## Share on the same Wi-Fi
+
+The UI is branded **Meet Hub**. To let a second device on your network connect, start with:
+
+```sh
+WEBPACK_DEV_SERVER_HOST=0.0.0.0 npm start
+```
+
+Find the host computer's Wi-Fi address (`ipconfig getifaddr en0` on macOS), then share **https://YOUR_LAN_IP:8080/YOUR_ROOM_NAME**. Choose a unique room name when starting a new meeting. Both participants should use that exact link when testing. The friend must accept the local HTTPS certificate prompt and allow camera and microphone access. The Mac must stay running, and both devices still need internet access for Jitsi's conferencing backend. The Wi-Fi address can change after reconnecting; networks with client isolation may block device-to-device access.
+
+Validated access through the host computer's LAN address: the home page, app title, manifest, and room pre-join screen all show Meet Hub, with no page JavaScript errors. A connection from the friend’s device still needs to be checked on that device.
