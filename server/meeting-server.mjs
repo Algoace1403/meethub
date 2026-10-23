@@ -10,7 +10,7 @@ const sameToken = (a, b) => typeof a === 'string' && typeof b === 'string' && /^
 const memberView = member => ({ id: member.id, name: member.name, status: member.status, joinedAt: member.joinedAt });
 const statusView = value => ({ mic: Boolean(value?.mic), camera: Boolean(value?.camera), sharing: Boolean(value?.sharing), hand: Boolean(value?.hand) });
 
-export function createMeetingServer({ origins = [], maxParticipants = 4, maxRooms = 50, staticDirectory, heartbeatMs = 25000 } = {}) {
+export function createMeetingServer({ origins = [], maxParticipants = 4, maxRooms = 50, staticDirectory, heartbeatMs = 25000, iceConfig } = {}) {
     const rooms = new Map();
     const allowedOrigins = new Set(origins);
     const sockets = new WebSocketServer({ noServer: true, maxPayload: 131072, perMessageDeflate: false });
@@ -93,7 +93,7 @@ export function createMeetingServer({ origins = [], maxParticipants = 4, maxRoom
                 room.members.set(identity, member);
                 if (canResume) previous.socket.close(4001, 'Session resumed');
                 clearTimeout(joinTimer);
-                send(socket, { type: 'joined', self: memberView(member), resumeToken: member.token, title: room.title, peers: [...room.members.values()].filter(value => value.id !== identity).map(memberView), messages: room.messages, maxParticipants });
+                send(socket, { type: 'joined', self: memberView(member), resumeToken: member.token, title: room.title, peers: [...room.members.values()].filter(value => value.id !== identity).map(memberView), messages: room.messages, maxParticipants, ...iceConfig });
                 broadcast(room, { type: canResume ? 'peer-updated' : 'peer-joined', peer: memberView(member) }, identity);
                 return;
             }
@@ -105,8 +105,10 @@ export function createMeetingServer({ origins = [], maxParticipants = 4, maxRoom
                 if (!target || target.id === identity) { fail(socket, 'peer-unavailable', 'That person has left the meeting.'); return; }
                 const description = message.description;
                 const candidate = message.candidate;
-                if (description && ['offer', 'answer'].includes(description.type) && typeof description.sdp === 'string' && description.sdp.length <= 110000) {
-                    send(target.socket, { type: 'signal', from: identity, description: { type: description.type, sdp: description.sdp } });
+                if (message.restart === true) {
+                    send(target.socket, { type: 'signal', from: identity, restart: true });
+                } else if (description && ['offer', 'answer'].includes(description.type) && typeof description.sdp === 'string' && description.sdp.length <= 110000) {
+                    send(target.socket, { type: 'signal', from: identity, generation: typeof message.generation === 'string' ? message.generation.slice(0, 80) : undefined, replyTo: typeof message.replyTo === 'string' ? message.replyTo.slice(0, 80) : undefined, description: { type: description.type, sdp: description.sdp } });
                 } else if (candidate && typeof candidate.candidate === 'string' && candidate.candidate.length < 5000) {
                     send(target.socket, { type: 'signal', from: identity, candidate: { candidate: candidate.candidate, sdpMid: candidate.sdpMid ?? null, sdpMLineIndex: candidate.sdpMLineIndex ?? null, usernameFragment: candidate.usernameFragment ?? null } });
                 } else fail(socket, 'invalid-signal', 'The connection update could not be read.');

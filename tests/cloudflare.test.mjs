@@ -36,8 +36,12 @@ integration('Cloudflare rooms route media negotiation and prevent cross-room sig
     assert.equal(second.peers[0].id, first.self.id);
     b.send({ type: 'signal', to: first.self.id, description: { type: 'offer', sdp: 'v=0' } });
     assert.equal((await a.next('signal')).from, second.self.id);
+    b.send({ type: 'signal', to: first.self.id, restart: true });
+    assert.deepEqual(await a.next('signal'), { type: 'signal', from: second.self.id, restart: true });
     const other = await peer('other-' + crypto.randomUUID()); await other.join();
     other.send({ type: 'signal', to: first.self.id, description: { type: 'offer', sdp: 'v=0' } });
+    assert.equal((await other.next('error')).code, 'peer-unavailable');
+    other.send({ type: 'signal', to: first.self.id, restart: true });
     assert.equal((await other.next('error')).code, 'peer-unavailable');
 });
 
@@ -70,4 +74,14 @@ integration('Cloudflare rejects foreign browser origins and serves own room rout
     const bad = new WebSocket(url, { origin: 'https://foreign.test' }); const [error] = await once(bad, 'error'); assert.match(error.message, /403/);
     assert.equal((await fetch(new URL('/health', base))).status, 200);
     const roomPage = await fetch(new URL('/my-own-room', base)); assert.equal(roomPage.status, 200); assert.match(await roomPage.text(), /Meet Hub/);
+});
+
+integration('owned Vercel deployment links can reach the room backend', async t => {
+    const url = new URL('/signal?room=deployment-origin-test', base); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    const socket = new WebSocket(url, { origin: 'https://meethub-testdeploy-anujsoni1403-3449s-projects.vercel.app' });
+    t.after(() => socket.terminate()); await once(socket, 'open');
+    const message = once(socket, 'message'); socket.send(JSON.stringify({ type: 'join', room: 'deployment-origin-test', name: 'Guest' }));
+    assert.equal(JSON.parse((await message)[0]).type, 'joined');
+    const lookalike = new WebSocket(url, { origin: 'https://meethub-testdeploy-anujsoni1403-3449s-projects.vercel.app.foreign.test' });
+    const [error] = await once(lookalike, 'error'); assert.match(error.message, /403/);
 });

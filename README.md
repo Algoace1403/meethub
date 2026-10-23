@@ -31,7 +31,7 @@ For frontend development, run `npm run server` and `npm run dev` in separate ter
 
 See [DEPLOYMENT.md](DEPLOYMENT.md). `npm run deploy:cloudflare` publishes the site and room backend together using Workers Static Assets and SQLite-backed Durable Objects. Hibernating WebSockets keep idle rooms connected without an always-running VM. Use the Workers Free plan and included provider address. Availability and usage limits still apply.
 
-No payment integration or paid media relay is configured. The default browser ICE configuration uses a free public STUN server for network discovery. Some networks require a TURN relay and cannot connect with STUN alone. Calls have not been certified for every physical device or network combination.
+No payment integration or paid media relay is configured. The default browser ICE configuration uses a free public STUN server for network discovery. Some networks require a TURN relay and cannot connect with STUN alone. Use `npm run setup:relay` to connect a strictly Free relay account; no relay account or paid plan is created automatically. Calls have not been certified for every physical device or network combination.
 
 ## Test
 

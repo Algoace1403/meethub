@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Brand, Icon } from './icons.jsx';
 import { MeetingClient } from './meeting.js';
+import { invitationUrl } from './urls.js';
 
 export function roomTitle(room) {
     return room.replace(/-[a-f0-9]{12}$/, '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]+/g, ' ').replace(/^./, value => value.toUpperCase()) || 'Meet Hub room';
@@ -14,7 +15,7 @@ export async function copyLink(text) {
 }
 function initials(name = 'Guest') { return name.trim().split(/\s+/).slice(0, 2).map(value => value[0]).join('').toUpperCase(); }
 
-function VideoTile({ stream, name, local, status, connection, count }) {
+function VideoTile({ stream, name, local, status, connection, connectionError, onRetry, count }) {
     const video = useRef(null);
     const [audioBlocked, setAudioBlocked] = useState(false);
     const showVideo = Boolean(status?.camera || status?.sharing);
@@ -30,7 +31,7 @@ function VideoTile({ stream, name, local, status, connection, count }) {
         {audioBlocked && !local && <button className="enable-audio" onClick={()=>video.current.play().then(()=>setAudioBlocked(false))}>Tap to play audio</button>}
         <div className="tile-label"><span>{name}{local?' (you)':''}</span>{!status?.mic && <Icon name="mic" off size={15}/>}</div>
         {status?.hand && <div className="raised-hand"><Icon name="hand" size={20}/><span className="sr-only">Hand raised</span></div>}
-        {!local && connection && connection !== 'connected' && <div className="peer-connecting">{connection==='failed'?'Connection interrupted':'Connecting…'}</div>}
+        {!local && connection && connection !== 'connected' && <div className="peer-connecting" role="status">{connectionError || (connection==='failed'?'Connection interrupted':'Connecting audio and video…')}{connectionError && <button className="retry-media" onClick={onRetry}>Retry connection</button>}</div>}
         {count===1 && <span className="tile-watermark">A little closer, from anywhere.</span>}
     </article>;
 }
@@ -73,7 +74,7 @@ export default function Room({ room, navigate }) {
     const nameInput = useRef(null);
     const previousMessages = useRef(0);
     const chatBottom = useRef(null);
-    const url = new URL('/'+encodeURIComponent(room),window.location.origin).href;
+    const url = invitationUrl(room);
     const title = snapshot.title || roomTitle(room);
 
     useEffect(()=>{
@@ -151,7 +152,7 @@ export default function Room({ room, navigate }) {
     }
     function sendChat(event){event.preventDefault();if(chat.trim()){client.current?.chat(chat);setChat('');}}
     const selfStatus={mic,camera,sharing:Boolean(screen),hand};
-    const statusLabel=snapshot.state==='joined'?'Connected':snapshot.state==='reconnecting'?'Reconnecting…':snapshot.state==='error'?'Unable to join':'Connecting room…';
+    const statusLabel=snapshot.state==='joined'?'In room':snapshot.state==='reconnecting'?'Reconnecting…':snapshot.state==='error'?'Unable to join':'Connecting room…';
     const time=`${Math.floor(elapsed/60).toString().padStart(2,'0')}:${(elapsed%60).toString().padStart(2,'0')}`;
 
     if(phase==='left')return <div className="left-page"><Brand/><div className="left-card"><div className="dialog-symbol"><Icon name="check" size={30}/></div><p className="eyebrow">UNTIL NEXT TIME</p><h1>Good to see you.</h1><p>You’ve left the meeting. Your room link is still yours to share.</p><div className="left-actions"><button className="primary" onClick={()=>{setError('');setPhase('prejoin');setMic(true);setCamera(true);}}>Rejoin meeting</button><button className="secondary" onClick={()=>navigate('/')}>Back to home</button></div></div></div>;
@@ -166,10 +167,10 @@ export default function Room({ room, navigate }) {
             </section></main>{invite&&<InviteDialog url={url} onClose={()=>setInvite(false)}/>}</div>;
 
     return <div className="meeting-page"><header className="meeting-header"><Brand light/><div className="meeting-title"><strong title={title}>{title}</strong><span>{time}<i/>Up to {snapshot.maxParticipants||4} people</span></div><div className={`connection-pill ${snapshot.state==='joined'?'online':''}`} role="status"><i/>{statusLabel}</div><button className="invite-top" aria-label="Invite people" onClick={()=>setInvite(true)}><Icon name="link"/><span>Invite people</span></button></header>
-        {(snapshot.error||snapshot.state==='error')&&<div className="room-notice" role="alert">{snapshot.error||'The room could not be joined.'}{snapshot.state==='error'&&<button onClick={leave}>Back to join screen</button>}</div>}
+        {(snapshot.error||snapshot.state==='error')&&<div className="room-notice" role="alert">{snapshot.error||'The room could not be joined.'}<button onClick={()=>client.current?.reconnect()}>Reconnect to meeting</button>{snapshot.state==='error'&&<button onClick={leave}>Back to join screen</button>}</div>}
         <div className={`meeting-layout ${drawer?'drawer-open':''}`}><main className="meeting-stage"><div className="video-grid" data-count={snapshot.peers.length+1}>
             <VideoTile stream={screen||stream} name={name} local status={selfStatus} count={snapshot.peers.length+1}/>
-            {snapshot.peers.map(peer=><VideoTile key={peer.id} {...peer} connection={peer.connection}/>)}
+            {snapshot.peers.map(peer=><VideoTile key={peer.id} {...peer} connection={peer.connection} onRetry={()=>client.current?.retryMedia()}/>)}
         </div>{snapshot.peers.length===0&&<div className="waiting-note"><Icon name="users"/><div><strong>You’re the first one here.</strong><span>Send the room link and bring someone a little closer.</span></div><button onClick={()=>setInvite(true)}>Copy invite<Icon name="arrow" size={18}/></button></div>}</main>
         {drawer&&<aside className="meeting-drawer" aria-label={drawer==='chat'?'Meeting chat':'Participants'}><div className="drawer-heading"><h2>{drawer==='chat'?'Conversation':'Your people'}<span>{drawer==='chat'?'':snapshot.peers.length+1}</span></h2><button className="icon-button" aria-label="Close panel" onClick={()=>setDrawer(null)}><Icon name="close"/></button></div>
             {drawer==='chat'?<><div className="messages">{!snapshot.messages.length&&<div className="chat-empty"><Icon name="chat" size={35}/><p>A little hello goes a long way.</p><span>Messages are shared with everyone in this room.</span></div>}{snapshot.messages.map(item=><article key={item.id} className={`chat-message ${item.from===snapshot.self?.id?'mine':''}`}><header><strong>{item.from===snapshot.self?.id?'You':item.name}</strong><time>{new Date(item.timestamp).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</time></header><p>{item.text}</p></article>)}<div ref={chatBottom}/></div><form className="chat-compose" onSubmit={sendChat}><label className="sr-only" htmlFor="message">Message everyone</label><input id="message" value={chat} onChange={event=>setChat(event.target.value)} maxLength={2000} placeholder="Say something…"/><button type="submit" aria-label="Send message" disabled={!chat.trim()||snapshot.state!=='joined'}><Icon name="send"/></button></form></>:

@@ -42,6 +42,12 @@ test('connection messages cannot cross room boundaries',async t=>{
     assert.equal((await b.next('error')).code,'peer-unavailable');
 });
 
+test('media recovery requests reach only the selected participant in the same room',async t=>{
+    const {peer}=await fixture(t);const a=await peer();const first=await a.join();const b=await peer();const second=await b.join();
+    b.send({type:'signal',to:first.self.id,restart:true});assert.deepEqual(await a.next('signal'),{type:'signal',from:second.self.id,restart:true});
+    const other=await peer();await other.join('other-room');other.send({type:'signal',to:first.self.id,restart:true});assert.equal((await other.next('error')).code,'peer-unavailable');
+});
+
 test('room chat is attributed by the server and bounded',async t=>{
     const {peer}=await fixture(t);const a=await peer();const info=await a.join('room-one','Actual name');const b=await peer();await b.join('room-one');
     a.send({type:'chat',from:'forged',name:'Forged name',text:'hello '.repeat(500)});

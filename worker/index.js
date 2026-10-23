@@ -1,4 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
+import { getIceConfig } from '../server/ice-config.mjs';
 
 const validRoom = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{3,80}$/.test(value);
 const cleanText = (value, limit) => typeof value === 'string' ? value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim().slice(0, limit) : '';
@@ -18,15 +19,21 @@ const capacity = env => Math.max(2, Math.min(4, Number(env.MAX_PARTICIPANTS) || 
 export default {
     async fetch(request, env) {
         const url = new URL(request.url);
-        if (url.pathname === '/health') return Response.json({ status: 'ok', service: 'Meet Hub', maxParticipants: capacity(env) }, { headers: { 'Cache-Control': 'no-store' } });
+        if (url.pathname === '/health') return Response.json({ status: 'ok', service: 'Meet Hub', maxParticipants: capacity(env), relayConfigured: Boolean((env.TURN_KEY_ID && env.TURN_API_TOKEN) || (env.METERED_APP_NAME && env.METERED_API_KEY) || env.ICE_SERVERS_JSON) }, { headers: { 'Cache-Control': 'no-store' } });
         if (url.pathname !== '/signal') return env.ASSETS.fetch(request);
         if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') return new Response('WebSocket required', { status: 426 });
         const origin = request.headers.get('Origin');
         const allowed = (env.ALLOWED_ORIGINS || '').split(',').map(value => value.trim());
-        if (!origin || (origin !== url.origin && !allowed.includes(origin))) return new Response('Origin not allowed', { status: 403 });
+        const projectDeployment = /^https:\/\/meethub-[a-z0-9-]+-anujsoni1403-3449s-projects\.vercel\.app$/.test(origin || '');
+        if (!origin || (origin !== url.origin && !allowed.includes(origin) && !projectDeployment)) return new Response('Origin not allowed', { status: 403 });
         const room = url.searchParams.get('room');
         if (!validRoom(room)) return new Response('Invalid Meet Hub room', { status: 400 });
-        return env.ROOMS.get(env.ROOMS.idFromName(room)).fetch(request);
+        let ice;
+        try { ice = await getIceConfig(env); }
+        catch { ice = { iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }], relayAvailable: false }; }
+        const headers = new Headers(request.headers);
+        headers.set('X-MeetHub-Ice', JSON.stringify(ice));
+        return env.ROOMS.get(env.ROOMS.idFromName(room)).fetch(new Request(request, { headers }));
     }
 };
 
@@ -36,6 +43,7 @@ export class MeetingRoom extends DurableObject {
     constructor(ctx, env) {
         super(ctx, env);
         this.maxParticipants = capacity(env);
+        ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('{"type":"ping"}', '{"type":"pong"}'));
         ctx.blockConcurrencyWhile(async () => {
             const saved = await ctx.storage.get('room');
             this.title = saved?.title || '';
@@ -54,7 +62,9 @@ export class MeetingRoom extends DurableObject {
         if (!validRoom(room)) return new Response('Invalid room', { status: 400 });
         const [client, server] = Object.values(new WebSocketPair());
         this.ctx.acceptWebSocket(server);
-        server.serializeAttachment({ room, connectedAt: Date.now(), rateStart: Date.now(), messageCount: 0 });
+        let ice;
+        try { ice = JSON.parse(request.headers.get('X-MeetHub-Ice')); } catch {}
+        server.serializeAttachment({ room, ice, connectedAt: Date.now(), rateStart: Date.now(), messageCount: 0 });
         return new Response(null, { status: 101, webSocket: client });
     }
     async webSocketMessage(socket, raw) {
@@ -84,7 +94,7 @@ export class MeetingRoom extends DurableObject {
                 previous.socket.close(4001, 'Session resumed');
             }
             if (!members.length) { this.title = cleanText(message.title, 80) || 'Meet Hub room'; this.messages = []; }
-            send(socket, { type: 'joined', self: memberView(member), resumeToken: member.token, title: this.title, peers: this.members(socket).map(memberView), messages: this.messages, maxParticipants: this.maxParticipants });
+            send(socket, { type: 'joined', self: memberView(member), resumeToken: member.token, title: this.title, peers: this.members(socket).map(memberView), messages: this.messages, maxParticipants: this.maxParticipants, ...attachment.ice });
             this.broadcast({ type: canResume ? 'peer-updated' : 'peer-joined', peer: memberView(member) }, socket);
             await this.persist();
             return;
@@ -94,8 +104,10 @@ export class MeetingRoom extends DurableObject {
             const target = this.members(socket).find(member => member.id === message.to);
             if (!target) { fail(socket, 'peer-unavailable', 'That person has left the meeting.'); return; }
             const { description, candidate } = message;
-            if (description && ['offer', 'answer'].includes(description.type) && typeof description.sdp === 'string' && description.sdp.length <= 110000) {
-                send(target.socket, { type: 'signal', from: attachment.id, description: { type: description.type, sdp: description.sdp } });
+            if (message.restart === true) {
+                send(target.socket, { type: 'signal', from: attachment.id, restart: true });
+            } else if (description && ['offer', 'answer'].includes(description.type) && typeof description.sdp === 'string' && description.sdp.length <= 110000) {
+                send(target.socket, { type: 'signal', from: attachment.id, generation: typeof message.generation === 'string' ? message.generation.slice(0, 80) : undefined, replyTo: typeof message.replyTo === 'string' ? message.replyTo.slice(0, 80) : undefined, description: { type: description.type, sdp: description.sdp } });
             } else if (candidate && typeof candidate.candidate === 'string' && candidate.candidate.length < 5000) {
                 send(target.socket, { type: 'signal', from: attachment.id, candidate: { candidate: candidate.candidate, sdpMid: typeof candidate.sdpMid === 'string' ? candidate.sdpMid.slice(0, 256) : null, sdpMLineIndex: Number.isInteger(candidate.sdpMLineIndex) ? candidate.sdpMLineIndex : null, usernameFragment: typeof candidate.usernameFragment === 'string' ? candidate.usernameFragment.slice(0, 256) : null } });
             } else fail(socket, 'invalid-signal', 'The connection update could not be read.');

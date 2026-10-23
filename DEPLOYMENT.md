@@ -43,3 +43,16 @@ Copied invitation links always use the frontend's current origin. Signaling uses
 ## Redeploy
 
 Run `npm run deploy:cloudflare` after changes. The `v1` migration creates the initial SQLite-backed room class; future class changes need additional migration entries. Existing WebSockets can reconnect during updates. No uptime-pinging service is needed.
+
+
+## Guest audio/video stuck connecting
+
+A room WebSocket connection and a media connection are separate. STUN alone cannot relay audio/video across every NAT or firewall. Guests on different mobile or restricted Wi-Fi networks may require TURN.
+
+For a strictly free prototype, create a Metered no-card Free TURN trial (currently 500 MB in the dashboard; provider allowances can change), do not add a payment method, and do not enable paid top-ups. Create one client credential under TURN → Credentials; use Get credential → Show API Key on that row as the backend TURN API key, not the workspace secret. Run `npm run setup:relay` and enter its app name and TURN API key in the private local form. The helper verifies the account credentials and stores `METERED_APP_NAME` and `METERED_API_KEY` as Cloudflare backend secrets. The application and signaling remain on your Cloudflare Worker; guests are never sent to the relay provider website. Stay within the Free quota; availability depends on that provider and its allowance.
+
+Alternatively, store your own client ICE configuration as the backend `ICE_SERVERS_JSON` secret. A Cloudflare Realtime TURN key can be configured through `TURN_KEY_ID` and `TURN_API_TOKEN`, but that service has usage-based overages and is not activated by this repository. Do not enable a billable plan without authorization.
+
+After configuration, reload both clients and rejoin. The backend supplies client ICE credentials in the join response before any peer connection is created. Account API keys remain server-side. `/health` reports whether relay settings are configured; this does not prove relay connectivity. Verify actual video with `iceTransportPolicy: relay` and inspect the selected candidate pair before declaring a cross-network issue fixed.
+
+The client times out stalled room handshakes, checks idle WebSocket connections, retries peer negotiation, and exposes a reconnect button after a failed attempt. Chat can continue when the room is connected but media is unavailable. Shared URLs must be public HTTPS links rather than localhost links.
