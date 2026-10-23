@@ -1,3 +1,32 @@
+# Meet Hub
+
+A custom web UI for [Jitsi Meet](https://github.com/jitsi/jitsi-meet), with a cream and forest-green welcome page, responsive meeting controls, and Meet Hub branding.
+
+![Meet Hub desktop preview](local-preview-desktop.png)
+
+## Run locally
+
+Requires Node.js 24+ and npm 11+.
+
+```sh
+git clone https://github.com/Algoace1403/meethub.git
+cd meethub
+npm ci
+npm start
+```
+
+Open **https://localhost:8080/** and accept the development HTTPS certificate prompt. Enter a unique room name, review your devices, and join.
+
+For same-Wi-Fi access, run `WEBPACK_DEV_SERVER_HOST=0.0.0.0 npm start` and share `https://YOUR_LAN_IP:8080/YOUR_ROOM_NAME`.
+
+See [local setup, LAN invitations, and validation](LOCAL-DEVELOPMENT.md) for details. This prototype uses Jitsi's online development backend; it does not include a self-hosted conferencing deployment.
+
+## Upstream attribution
+
+Meet Hub customizes the Jitsi Meet frontend. The imported source snapshot is [`d5e2f645189f`](https://github.com/jitsi/jitsi-meet/commit/d5e2f645189f6216be9a2f61d9aa7ffa7d60f11c). Jitsi's conferencing implementation, copyright notices, and [Apache-2.0 license](LICENSE) are retained. Original Jitsi documentation follows.
+
+---
+
 # <p align="center">Jitsi Meet</p>
 
 Jitsi Meet is a set of Open Source projects which empower users to use and deploy
