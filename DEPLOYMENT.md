@@ -1,6 +1,6 @@
 # Meet Hub on Cloudflare
 
-The site, room signaling, and chat run together in your Cloudflare account. Native WebRTC sends audio and video between browsers. No personal computer, VM, paid database, or separate meeting website is required.
+The site, room signaling, and chat run together in your Cloudflare account. Native WebRTC sends audio and video directly between browsers or through the configured TURN relay. No personal computer, VM, paid database, or separate meeting website is required.
 
 ## Deploy
 
@@ -32,7 +32,7 @@ This avoids a personal computer or sleeping free VM. It does not guarantee unint
 
 Up to four people can join a room. Media uses a peer-to-peer mesh for this small prototype. No paid relay or subscription is enabled. Free quotas can change; inspect [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/), [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/), and [limits](https://developers.cloudflare.com/durable-objects/platform/limits/). Remain on the Free plan if spending must be zero.
 
-The default ICE configuration uses Cloudflare's free public STUN service for network discovery. Some restrictive networks require TURN, which is not configured. Such networks may join the room and chat but fail to establish audio/video. See [Cloudflare STUN/TURN FAQ](https://developers.cloudflare.com/realtime/turn/faq/).
+The source fallback uses Cloudflare's public STUN service for network discovery. The public deployment has backend relay configuration; actual two-way video over TLS TURN was verified on 27 October 2026. Fresh deployments still require their own relay secrets. If a provider fails or its quota is exhausted, the backend falls back to STUN and restrictive networks may join/chat without establishing media. See [Cloudflare STUN/TURN FAQ](https://developers.cloudflare.com/realtime/turn/faq/).
 
 ## Retain the Vercel address (optional)
 
@@ -44,12 +44,11 @@ Copied invitation links always use the frontend's current origin. Signaling uses
 
 Run `npm run deploy:cloudflare` after changes. The `v1` migration creates the initial SQLite-backed room class; future class changes need additional migration entries. Existing WebSockets can reconnect during updates. No uptime-pinging service is needed.
 
-
 ## Guest audio/video stuck connecting
 
 A room WebSocket connection and a media connection are separate. STUN alone cannot relay audio/video across every NAT or firewall. Guests on different mobile or restricted Wi-Fi networks may require TURN.
 
-For a strictly free prototype, create a Metered no-card Free TURN trial (currently 500 MB in the dashboard; provider allowances can change), do not add a payment method, and do not enable paid top-ups. Create one client credential under TURN → Credentials; use Get credential → Show API Key on that row as the backend TURN API key, not the workspace secret. Run `npm run setup:relay` and enter its app name and TURN API key in the private local form. The helper verifies the account credentials and stores `METERED_APP_NAME` and `METERED_API_KEY` as Cloudflare backend secrets. The application and signaling remain on your Cloudflare Worker; guests are never sent to the relay provider website. Stay within the Free quota; availability depends on that provider and its allowance.
+For a strictly free prototype, create a Metered no-card Free TURN trial (use the allowance shown in the dashboard; provider allowances can change), do not add a payment method, and do not enable paid top-ups. Create one client credential under TURN → Credentials; use Get credential → Show API Key on that row as the backend TURN API key, not the workspace secret. Run `npm run setup:relay` and enter its app name and TURN API key in the private local form. The helper verifies the account credentials and stores `METERED_APP_NAME` and `METERED_API_KEY` as Cloudflare backend secrets. The application and signaling remain on your Cloudflare Worker; guests are never sent to the relay provider website. Stay within the Free quota; availability depends on that provider and its allowance.
 
 Alternatively, store your own client ICE configuration as the backend `ICE_SERVERS_JSON` secret. A Cloudflare Realtime TURN key can be configured through `TURN_KEY_ID` and `TURN_API_TOKEN`, but that service has usage-based overages and is not activated by this repository. Do not enable a billable plan without authorization.
 

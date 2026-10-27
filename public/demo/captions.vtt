@@ -1,0 +1,274 @@
+WEBVTT
+
+00:00:00.086 --> 00:00:03.355
+The problem: a small study group wants to discuss
+
+00:00:03.398 --> 00:00:06.796
+an assignment, but the conversation gets delayed by app
+
+00:00:07.011 --> 00:00:11.269
+installations, account creation, and confusing meeting links.
+
+00:00:11.441 --> 00:00:13.419
+People should be able to open a link and
+
+00:00:13.591 --> 00:00:15.226
+start working together.
+
+00:00:15.376 --> 00:00:18.581
+The solution is Meet Hub: a browser meeting room
+
+00:00:18.667 --> 00:00:20.301
+for up to four people.
+
+00:00:20.473 --> 00:00:23.484
+Create a room, share one link, check your camera
+
+00:00:23.570 --> 00:00:25.720
+and microphone, and join.
+
+00:00:25.935 --> 00:00:29.849
+Audio, video, screen sharing, and chat stay inside the
+
+00:00:29.978 --> 00:00:31.312
+same application.
+
+00:00:31.398 --> 00:00:34.925
+This is Meet Hub, an end-term software project by
+
+00:00:34.968 --> 00:00:36.600
+Anuj Kumar Soni.
+
+00:00:36.645 --> 00:00:40.000
+The interface is built with React and Vite.
+
+00:00:40.043 --> 00:00:44.559
+The project's own Node and WebSocket backend coordinates membership,
+
+00:00:44.731 --> 00:00:50.237
+chat, and media negotiation, while native WebRTC transports media.
+
+00:00:50.323 --> 00:00:53.505
+Render provides a hosting option for this code.
+
+00:00:53.591 --> 00:00:56.860
+The four-person limit keeps the peer mesh appropriate for
+
+00:00:56.946 --> 00:00:58.667
+small study groups.
+
+00:00:58.710 --> 00:01:03.914
+The repository includes setup instructions, architecture decisions, tests, and
+
+00:01:04.000 --> 00:01:05.720
+clear limitations.
+
+00:01:05.806 --> 00:01:08.559
+Meet Hub turns a shared link into a working
+
+00:01:08.946 --> 00:01:09.505
+conversation.
+
+00:01:09.505 --> 00:01:12.996
+This is the real Meet Hub meeting, recorded with
+
+00:01:12.996 --> 00:01:15.711
+a guest joining through the shared link.
+
+00:01:15.711 --> 00:01:18.426
+Both video tiles come from actual cameras.
+
+00:01:18.426 --> 00:01:21.917
+The room shows who is present and keeps the
+
+00:01:21.917 --> 00:01:23.468
+main controls within reach.
+
+00:01:23.468 --> 00:01:26.959
+This is the experience the project is designed around:
+
+00:01:26.959 --> 00:01:30.449
+a small group getting into a conversation quickly, inside
+
+00:01:30.449 --> 00:01:31.613
+one browser application.
+
+00:01:31.613 --> 00:01:33.935
+Let us start with the first workflow.
+
+00:01:33.978 --> 00:01:37.204
+A meeting name creates a unique room address.
+
+00:01:37.376 --> 00:01:40.559
+Before joining, the prejoin screen asks for a display
+
+00:01:40.645 --> 00:01:43.799
+name and lets the participant check devices.
+
+00:01:43.857 --> 00:01:46.495
+The preview shows the real camera feed.
+
+00:01:46.538 --> 00:01:48.989
+A participant can also choose to join with the
+
+00:01:49.204 --> 00:01:52.516
+camera and microphone off, then enable them during the
+
+00:01:52.860 --> 00:01:53.247
+call.
+
+00:01:53.290 --> 00:01:56.215
+Clear permission messages explain what to do if a
+
+00:01:56.473 --> 00:01:58.241
+browser blocks a device.
+
+00:01:58.576 --> 00:02:00.172
+Next, invite someone.
+
+00:02:00.215 --> 00:02:03.527
+The invitation dialog copies the room link and confirms
+
+00:02:03.613 --> 00:02:04.860
+that it was copied.
+
+00:02:04.903 --> 00:02:07.914
+Opening that link in another browser session goes straight
+
+00:02:07.957 --> 00:02:10.266
+to the same room's join screen.
+
+00:02:10.380 --> 00:02:13.849
+After joining, participants discover each other through the project's
+
+00:02:13.935 --> 00:02:15.627
+own signaling server.
+
+00:02:15.685 --> 00:02:18.710
+Their browsers then negotiate the media connection.
+
+00:02:18.753 --> 00:02:22.108
+The server handles the room; the browsers exchange the
+
+00:02:22.194 --> 00:02:23.925
+actual audio and video.
+
+00:02:24.000 --> 00:02:26.624
+Now the conversation can become useful.
+
+00:02:26.667 --> 00:02:29.849
+Room chat lets participants exchange notes while the call
+
+00:02:30.065 --> 00:02:30.925
+continues.
+
+00:02:30.968 --> 00:02:34.667
+The server assigns the sender's identity, so clients cannot
+
+00:02:34.753 --> 00:02:37.806
+simply claim another participant sent a message.
+
+00:02:37.849 --> 00:02:41.763
+Text that looks like HTML remains ordinary text.
+
+00:02:41.806 --> 00:02:44.731
+The participant panel shows who is present.
+
+00:02:44.903 --> 00:02:48.430
+Raised hands communicate a request to speak, while microphone
+
+00:02:48.516 --> 00:02:51.441
+and camera controls update the media tracks and the
+
+00:02:51.527 --> 00:02:53.602
+status other participants see.
+
+00:02:53.677 --> 00:02:56.860
+For discussing an assignment, screen sharing is often the
+
+00:02:56.989 --> 00:02:58.524
+most important feature.
+
+00:02:58.552 --> 00:03:01.935
+The participant chooses a capture source through the browser.
+
+00:03:02.065 --> 00:03:04.946
+Meet Hub replaces the outgoing video track with that
+
+00:03:05.032 --> 00:03:06.151
+screen track.
+
+00:03:06.237 --> 00:03:09.161
+Stopping the share restores the camera without leaving the
+
+00:03:09.247 --> 00:03:11.957
+room or generating a new invitation.
+
+00:03:12.000 --> 00:03:15.240
+Sharing also works while the camera is switched off,
+
+00:03:15.384 --> 00:03:17.945
+subject to the browser's screen-capture support.
+
+00:03:18.012 --> 00:03:21.333
+A complete application must also handle failure.
+
+00:03:21.376 --> 00:03:24.903
+a network interruption changes the connection state and displays
+
+00:03:24.989 --> 00:03:26.452
+an actionable message.
+
+00:03:26.538 --> 00:03:30.667
+When connectivity returns, Meet Hub reconnects the room and
+
+00:03:30.839 --> 00:03:32.559
+restores collaboration.
+
+00:03:32.903 --> 00:03:35.828
+Sending a new chat message confirms that the room
+
+00:03:35.914 --> 00:03:37.290
+connection works again.
+
+00:03:37.978 --> 00:03:43.140
+Join timeouts, heartbeat checks, reconnect backoff, and stale negotiation
+
+00:03:43.226 --> 00:03:45.161
+handling support recovery.
+
+00:03:45.462 --> 00:03:48.559
+An optional TURN relay helps when a direct media
+
+00:03:48.645 --> 00:03:50.796
+connection is blocked by the network.
+
+00:03:52.258 --> 00:03:55.613
+Leaving the call stops the participant's capture tracks and
+
+00:03:55.699 --> 00:03:57.161
+updates room membership.
+
+00:03:57.677 --> 00:04:00.688
+The user returns to Meet Hub, where recent room
+
+00:04:00.774 --> 00:04:02.753
+links are stored in that browser.
+
+00:04:03.355 --> 00:04:06.538
+Room chat is temporary and bounded to the latest
+
+00:04:06.710 --> 00:04:08.000
+fifty messages.
+
+00:04:08.258 --> 00:04:11.527
+The Node backend clears its in-memory room state when
+
+00:04:11.613 --> 00:04:14.581
+the room empties or the server restarts.
+
+00:04:14.882 --> 00:04:17.806
+Meet Hub does not record calls or provide a
+
+00:04:17.892 --> 00:04:19.613
+permanent message archive.

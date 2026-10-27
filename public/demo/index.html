@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Meet Hub: the problem, solution, implementation and feature overview, with a real two-person meeting and ElevenLabs narration."
+    />
+    <title>Meet Hub — Product demonstration</title>
+    <link rel="icon" href="/favicon.svg" />
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #f8f7f2;
+        color: #244231;
+        font:
+          16px/1.65 system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 1080px;
+        margin: 0 auto;
+        padding: 40px 24px 64px;
+      }
+      nav {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 32px;
+      }
+      nav img {
+        width: 38px;
+      }
+      nav a {
+        font-size: 24px;
+        font-weight: 650;
+        text-decoration: none;
+      }
+      h1 {
+        font-size: clamp(30px, 5vw, 46px);
+        line-height: 1.15;
+        letter-spacing: -1.5px;
+        margin-bottom: 12px;
+      }
+      a {
+        color: inherit;
+      }
+      .intro {
+        max-width: 760px;
+      }
+      video {
+        display: block;
+        width: 100%;
+        margin: 28px 0 20px;
+        border-radius: 16px;
+        background: #101d18;
+      }
+      .note {
+        padding: 16px 20px;
+        background: #e7eedb;
+        border-radius: 10px;
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px 24px;
+        margin-top: 24px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <nav><img src="/favicon.svg" alt="" /><a href="/">Meet Hub</a></nav>
+      <h1>A room, a link, a conversation.</h1>
+      <p class="intro">
+        End-term product demonstration by Anuj Kumar Soni · Roll 25bcs10611 ·
+        Group A. The problem, solution, implementation and feature overview,
+        accompanied by a real two-person meeting recording.
+      </p>
+      <video
+        controls
+        preload="metadata"
+        poster="poster.jpg"
+        aria-label="Meet Hub narrated product demonstration"
+      >
+        <source src="meethub-demo.mp4" type="video/mp4" />
+        <track
+          kind="captions"
+          src="captions.vtt"
+          srclang="en"
+          label="English"
+          default
+        />
+        <p><a href="meethub-demo.mp4">Download the demonstration video</a>.</p>
+      </video>
+      <p class="note">
+        This presentation uses the original meeting recording supplied by Anuj,
+        with real camera feeds and deep male ElevenLabs AI narration. Titles
+        explain the application's features; the meeting footage does not
+        demonstrate every feature or failure scenario. The application does not
+        record calls; this footage was captured separately.
+      </p>
+      <div class="links">
+        <a href="/">Try Meet Hub</a
+        ><a href="meethub-demo.mp4" download>Download MP4</a
+        ><a href="https://github.com/Algoace1403/meethub"
+          >Source and documentation</a
+        >
+      </div>
+    </main>
+  </body>
+</html>
