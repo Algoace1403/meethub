@@ -8,14 +8,14 @@
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/signal", "/health"]
+    "run_worker_first": ["/signal", "/health"],
   },
   "vars": {
     "ALLOWED_ORIGINS": "https://meethub-pink.vercel.app",
-    "MAX_PARTICIPANTS": "4"
+    "MAX_PARTICIPANTS": "4",
   },
   "durable_objects": {
-    "bindings": [{ "name": "ROOMS", "class_name": "MeetingRoom" }]
+    "bindings": [{ "name": "ROOMS", "class_name": "MeetingRoom" }],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MeetingRoom"] }]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MeetingRoom"] }],
 }

@@ -9,15 +9,20 @@
   },
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "server": "node server/index.mjs",
+    "server": "node --env-file-if-exists=.env server/index.mjs",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0",
-    "start": "node server/index.mjs",
+    "start": "node --env-file-if-exists=.env server/index.mjs",
     "test": "node --test tests/*.test.mjs",
     "dev:cloudflare": "npm run build && wrangler dev --port 8787",
     "deploy:cloudflare": "npm run build && wrangler deploy",
     "check:cloudflare": "WORKER_TEST_URL=http://127.0.0.1:8787 node --test tests/cloudflare.test.mjs",
-    "setup:relay": "node scripts/configure-free-relay.mjs"
+    "setup:relay": "node scripts/configure-free-relay.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test:e2e": "playwright test",
+    "test:worker": "node --test tests/cloudflare.test.mjs",
+    "verify": "npm run format:check && npm test && npm run build"
   },
   "dependencies": {
     "react": "^19.3.1",
@@ -25,6 +30,8 @@
     "ws": "^8.22.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "prettier": "^3.9.10",
     "vite": "^8.3.5",
     "wrangler": "^4.152.0"
   },
