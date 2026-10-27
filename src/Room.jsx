@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Brand, Icon } from './icons.jsx';
 import { MeetingClient } from './meeting.js';
 import { invitationUrl } from './urls.js';
-import { roomTitle } from './rooms.js';
+import { roomTitle, initials } from './rooms.js';
 import VideoTile from './components/VideoTile.jsx';
 import InviteDialog from './components/InviteDialog.jsx';
 

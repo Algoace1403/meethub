@@ -7,3 +7,13 @@ export function roomTitle(room) {
       .replace(/^./, (value) => value.toUpperCase()) || 'Meet Hub room'
   );
 }
+
+export function initials(name = 'Guest') {
+  return name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((value) => value[0])
+    .join('')
+    .toUpperCase();
+}

@@ -1,15 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from '../icons.jsx';
-
-function initials(name = 'Guest') {
-  return name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((value) => value[0])
-    .join('')
-    .toUpperCase();
-}
+import { initials } from '../rooms.js';
 
 export default function VideoTile({
   stream,

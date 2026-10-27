@@ -134,6 +134,14 @@ test('create, invite, collaborate, enable devices later and leave', async ({
     await expect(guest.locator('[data-peer="Anuj"] video')).toHaveClass(
       /video-hidden/,
     );
+    await page
+      .getByRole('button', { name: 'Participants, 2 people', exact: true })
+      .click();
+    await expect(
+      page.getByRole('heading', { name: 'Your people' }),
+    ).toBeVisible();
+    await expect(page.locator('.people-list')).toContainText('Anuj (you)');
+    await expect(page.locator('.people-list')).toContainText('Maya');
     expect(
       await guest.evaluate(
         () => document.documentElement.scrollWidth <= innerWidth,
