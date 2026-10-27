@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: meethub
+    runtime: node
+    plan: free
+    numInstances: 1
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: '24'
+      - key: MAX_PARTICIPANTS
+        value: '4'
+      - key: MAX_ROOMS
+        value: '50'
+      - key: ALLOWED_ORIGINS
+        value: https://meethub-pink.vercel.app

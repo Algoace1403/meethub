@@ -17,7 +17,21 @@ const app = createMeetingServer({
     Math.max(2, Number(process.env.MAX_PARTICIPANTS) || 4),
   ),
   maxRooms: Math.min(200, Math.max(1, Number(process.env.MAX_ROOMS) || 50)),
-  iceConfig: await getIceConfig(process.env),
+  relayConfigured: Boolean(
+    process.env.ICE_SERVERS_JSON ||
+    (process.env.METERED_APP_NAME && process.env.METERED_API_KEY) ||
+    (process.env.TURN_KEY_ID && process.env.TURN_API_TOKEN),
+  ),
+  iceConfig: async () => {
+    try {
+      return await getIceConfig(process.env);
+    } catch {
+      console.warn(
+        'Media relay unavailable; using discovery-only connectivity.',
+      );
+      return getIceConfig({});
+    }
+  },
   staticDirectory: path.join(root, 'dist'),
 });
 app.server.listen(Number(process.env.PORT) || 3001, '0.0.0.0', () =>

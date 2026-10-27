@@ -12,6 +12,9 @@ const mime = {
   '.png': 'image/png',
   '.webmanifest': 'application/manifest+json',
   '.ico': 'image/x-icon',
+  '.jpg': 'image/jpeg',
+  '.mp4': 'video/mp4',
+  '.vtt': 'text/vtt; charset=utf-8',
 };
 const cleanText = (value, limit) =>
   typeof value === 'string'
@@ -46,6 +49,7 @@ export function createMeetingServer({
   staticDirectory,
   heartbeatMs = 25000,
   iceConfig,
+  relayConfigured = Boolean(iceConfig?.relayAvailable),
 } = {}) {
   const rooms = new Map();
   const allowedOrigins = new Set(origins);
@@ -84,7 +88,13 @@ export function createMeetingServer({
         'Cache-Control': 'no-store',
       });
       response.end(
-        JSON.stringify({ status: 'ok', service: 'Meet Hub', maxParticipants }),
+        JSON.stringify({
+          status: 'ok',
+          service: 'Meet Hub',
+          runtime: 'node',
+          maxParticipants,
+          relayConfigured,
+        }),
       );
       return;
     }
@@ -134,7 +144,7 @@ export function createMeetingServer({
     }
   });
 
-  server.on('upgrade', (request, socket, head) => {
+  server.on('upgrade', async (request, socket, head) => {
     let pathname;
     try {
       pathname = new URL(request.url, 'http://localhost').pathname;
@@ -159,9 +169,20 @@ export function createMeetingServer({
       socket.destroy();
       return;
     }
-    sockets.handleUpgrade(request, socket, head, (ws) =>
-      sockets.emit('connection', ws),
-    );
+    try {
+      const connectionIce =
+        typeof iceConfig === 'function' ? await iceConfig() : iceConfig;
+      if (socket.destroyed) return;
+      sockets.handleUpgrade(request, socket, head, (ws) => {
+        ws.iceConfig = connectionIce;
+        sockets.emit('connection', ws);
+      });
+    } catch {
+      socket.write(
+        'HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n',
+      );
+      socket.destroy();
+    }
   });
 
   sockets.on('connection', (socket) => {
@@ -266,7 +287,7 @@ export function createMeetingServer({
             .map(memberView),
           messages: room.messages,
           maxParticipants,
-          ...iceConfig,
+          ...socket.iceConfig,
         });
         broadcast(
           room,

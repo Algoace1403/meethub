@@ -205,3 +205,26 @@ test('the room service rejects an unapproved browser origin', async (t) => {
   );
   assert.equal(health.status, 200);
 });
+
+test('each new room connection receives refreshed relay configuration', async (t) => {
+  let generation = 0;
+  const { peer } = await fixture(t, {
+    iceConfig: async () => ({
+      iceServers: [
+        {
+          urls: 'turns:relay.test:443',
+          username: 'session-' + ++generation,
+          credential: 'temporary-client-credential',
+        },
+      ],
+      relayAvailable: true,
+    }),
+  });
+  const first = await peer();
+  const firstJoin = await first.join();
+  const second = await peer();
+  const secondJoin = await second.join();
+  assert.equal(firstJoin.iceServers[0].username, 'session-1');
+  assert.equal(secondJoin.iceServers[0].username, 'session-2');
+  assert.equal(secondJoin.relayAvailable, true);
+});
